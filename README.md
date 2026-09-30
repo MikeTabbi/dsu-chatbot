@@ -34,6 +34,44 @@ uvicorn api.app.main:app --reload
 
 Check it's running: http://localhost:8000/health
 
+## Retrieval
+
+`/chat` will depend only on the `Retriever` interface in [api/app/retriever.py](api/app/retriever.py):
+`search(question, k)` returns the top `k` chunks, best first, each with a `score` and the full
+chunk (`source_url`, `title`, `heading_path`, `modified_time`, `low_text`, `text`, ...). An empty
+list means nothing relevant was found. The `RETRIEVER` setting picks the implementation: `local`
+(the default) or `azure` (Azure AI Search, #22, not built yet).
+
+```bash
+python -m ingestion.chunk                                     # build data/chunks first
+python -m api.app.retriever "Which halls have carpeted rooms?"   # prints score, title, heading path, URL
+python -m api.app.retriever -k 3 "How do I send my SAT scores?"
+```
+
+The local retriever loads every file in `CHUNKS_DIR` (default `data/chunks`) into an in-memory
+**SQLite FTS5** index and ranks with FTS5's built-in **BM25**. Why FTS5:
+
+- It ships with Python's `sqlite3`, so there is no new dependency, no model download, and no
+  cloud account. A few hundred chunks index in milliseconds at startup.
+- Its `porter` tokenizer lowercases, drops punctuation, and stems, so "Rooms", "room", and
+  "carpeted"/"carpet" match. A hand-rolled BM25 would need its own tokenizer and stemmer.
+- BM25 is the same keyword ranking Azure AI Search uses, so local results are a fair preview of
+  its keyword mode when choosing keyword vs. vector vs. hybrid (#18).
+
+Details:
+
+- `title`, `heading_path`, and `text` are indexed together (headings aren't in `text`). Link URLs
+  are dropped from the indexed text; link text is kept.
+- The question is split into words, common stopwords ("what", "the", "do", ...) are dropped, and
+  the rest are ORed. Each word is quoted, so user input is never parsed as FTS5 query syntax.
+- **Relevance threshold:** a result needs a score above `RETRIEVER_MIN_SCORE` (default 0.1).
+  Words that appear in nearly every chunk (e.g. "housing") score about 0, so a question matching
+  only those returns nothing.
+- **Low-text chunks** (from near-empty pages) keep 80% of their score, so they still show up but
+  lose to a normal chunk with a similar score.
+- Keyword search has no synonyms ("dorm" doesn't match "hall") and favors short chunks, so a long
+  table that mentions a word once can rank below a short chunk that repeats other query words.
+
 ## Tests and linting
 
 ```bash

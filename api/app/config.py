@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     search_endpoint: str = ""
     search_api_key: str = ""
     search_index_name: str = "dsu-content"
+    retriever: str = "local"  # local (keyword search over chunks_dir) | azure (not built yet)
+    chunks_dir: str = "data/chunks"
+    retriever_min_score: float = 0.1
     allowed_origins: str = "http://localhost:8000"
     log_level: str = "INFO"
 
