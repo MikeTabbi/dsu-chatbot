@@ -104,3 +104,53 @@ For each `<name>.json` the crawler wrote, it writes `data/extracted/<name>.json`
 
 When adding a page from a new part of the site, run the extractor and check its output for menu
 text. New in-content chrome goes in `NOISE_SELECTORS` in [extract.py](extract.py).
+
+## Chunking
+
+```bash
+python -m ingestion.chunk                                    # data/extracted -> data/chunks
+python -m ingestion.chunk --extracted data/extracted-test --out data/chunks-test
+```
+
+The chunker reads the extractor's Markdown and splits it on headings first: every heading starts
+a new section, and each chunk records its **heading path**, e.g.
+`Housing & Dining > Freshman Residence Halls > Meta V. Jenkins Hall`. Heading lines are not
+repeated in `text`, so retrieval (#12) should embed `heading_path` together with `text`. Headings
+with no text of their own (e.g. `## Freshman Residence Halls`, followed straight away by the
+first hall) don't produce a chunk, but still appear in their children's paths. Text before the
+first heading uses the page title as its path.
+
+A section longer than **300 words** is split into pieces of at most 300 words, with about **50
+words of overlap** (whole sentences, list items, or paragraphs) at the start of each following
+piece. Why these numbers:
+
+- 300 words is roughly 400 tokens, which is enough for a full answer to a factual question
+  (a hall description, a deadline with its conditions) and small enough that a retrieved chunk is
+  mostly about one thing. Today's pages are 150 to 600 words, so nearly every section fits whole
+  and the split only kicks in for long pages such as the course catalog.
+- 50 words (about two sentences) of overlap keeps a sentence that depends on the one before it
+  from losing its context at a cut. More overlap mostly stores duplicate text.
+- Size is counted in words with the extractor's `word_count` rule (link URLs don't count), so no
+  tokenizer is needed. Common embedding models accept thousands of tokens per input, so the extra
+  tokens used by link URLs are not a problem.
+
+Cuts only fall between whole blocks, then list items or lines, then sentences. A single sentence
+over 300 words is cut into 300-word windows as a last resort. **Tables** are split only between
+rows, and every piece repeats the header row and its `---` line, so each piece still says which
+column is which hall. Table rows are not repeated as overlap. A single row longer than 300 words
+is kept whole, even though that chunk goes over the limit.
+
+For each `data/extracted/<name>.json`, it writes `data/chunks/<name>.json` with the page `url`
+and a `chunks` list. A page with no text still gets a file with an empty list. Each chunk has:
+
+- `chunk_id`: the first 16 hex digits of a SHA-256 over the source URL, heading path, and chunk
+  text. The same page content always gives the same IDs. Editing one section changes only that
+  section's IDs, so index sync (#13) can upsert new IDs and delete missing ones without
+  re-embedding the rest of the page. `modified_time` is not part of the ID, so a re-publish with
+  unchanged text keeps the same IDs. The rare identical chunk repeated under the same heading gets
+  an occurrence number in the hash to stay unique.
+- `chunk_index` (position within the page), `source_url` (canonical URL, else final URL),
+  `title`, `heading_path`, `modified_time`, `topic`
+- `low_text`: carried over from the page, so chunks from near-empty pages can be ranked down or
+  reviewed
+- `word_count`, `text` (Markdown)
