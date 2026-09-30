@@ -72,6 +72,32 @@ Details:
 - Keyword search has no synonyms ("dorm" doesn't match "hall") and favors short chunks, so a long
   table that mentions a word once can rank below a short chunk that repeats other query words.
 
+## Claude client
+
+`/chat` will depend only on the `ClaudeClient` interface in
+[api/app/claude_client.py](api/app/claude_client.py): `complete(system, messages)` returns the
+answer `text` plus the `model` that answered and its `input_tokens` / `output_tokens`. Any
+failure (timeout, rate limit, connection, API error, refusal or empty answer) raises one
+`ClaudeError` with a `reason`, so `/chat` can show a friendly message instead of crashing.
+
+The `CLAUDE_CLIENT` setting picks the implementation:
+
+- `fake` (the default): a predictable `[fake answer] <question>` with no network call or API key.
+  Tests and local development use it.
+- `anthropic`: Anthropic's API through the official `anthropic` SDK. Needs `ANTHROPIC_API_KEY`
+  in the environment or `.env` (never commit it; it is never logged).
+- `azure`: Claude through Azure, not built yet. Whether DSU uses Anthropic directly or Azure,
+  and which model, is decided in #19.
+
+Other settings: `CLAUDE_MODEL` (default `claude-opus-5`, a placeholder until #19),
+`CLAUDE_MAX_OUTPUT_TOKENS` (default 4096), `CLAUDE_TIMEOUT_SECONDS` (default 30). The SDK retries
+timeouts, 429s, and 5xx errors once. Each call logs the model, token counts, and latency.
+
+```bash
+python -m api.app.claude_client "When does fall move-in start?"                        # fake
+CLAUDE_CLIENT=anthropic python -m api.app.claude_client "Reply with: hello from DSU"   # real call
+```
+
 ## Tests and linting
 
 ```bash
