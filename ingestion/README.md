@@ -74,3 +74,33 @@ Politeness and failure handling:
   and listed in the manifest, and the crawl continues.
 - Sitemap discovery (<https://www.desu.edu/sitemap>) is not implemented yet. For now only
   registry URLs are crawled.
+
+## Extracting page content
+
+```bash
+python -m ingestion.extract                                  # data/raw -> data/extracted
+python -m ingestion.extract --raw data/raw-test --out data/extracted-test
+```
+
+Every desu.edu page carries about 120 KB of site chrome (mega-menu, mobile nav, header, footer)
+around a few KB of content. The extractor keeps only the content region, `main [role=main]` in
+the site's Drupal 7 theme, and removes the chrome that sits inside it: the breadcrumb, the
+section menu sidebar, the "Start your journey here" box, and the landing-page quick-link bar. If
+a page has no content region, it falls back to `<body>` with the header, footer, nav, and cookie
+banner removed, and records a warning.
+
+For each `<name>.json` the crawler wrote, it writes `data/extracted/<name>.json` with:
+
+- `text`: the content as Markdown. Headings, paragraphs, lists, and tables are kept. Links become
+  `[text](absolute url)` so answers can cite them. Embedded videos become an `[Embedded video](url)`
+  link. Images are dropped.
+- `title`, `canonical_url`, `modified_time` (`article:modified_time`, else `og:updated_time`),
+  `breadcrumb` (list of `{title, url}`)
+- `url`, `final_url`, `topic`, `fetched_at`, `raw_file`: carried over from the crawl
+- `container`: the selector that matched the content region, or `fallback`
+- `word_count`, `low_text`, `warnings`: pages under 50 words (e.g. the SAT/ACT page, which is
+  mostly a video and images) get `low_text: true` and a warning, and are logged, so they can be
+  reviewed instead of silently producing near-empty chunks.
+
+When adding a page from a new part of the site, run the extractor and check its output for menu
+text. New in-content chrome goes in `NOISE_SELECTORS` in [extract.py](extract.py).
