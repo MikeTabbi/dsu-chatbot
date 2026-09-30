@@ -14,6 +14,7 @@ from api.app.claude_client import (
     main,
 )
 from api.app.config import Settings
+from api.app.config import settings as app_settings
 
 KEY = "sk-ant-test-not-a-real-key"
 SYSTEM = "You answer questions about Delaware State University."
@@ -130,6 +131,15 @@ def test_blank_env_values_keep_the_defaults(monkeypatch):
     monkeypatch.setenv("CLAUDE_CLIENT", "")
     config = Settings(_env_file=None)
     assert (config.claude_model, config.claude_client) == ("claude-opus-5", "fake")
+
+
+def test_tests_ignore_dot_env_and_use_the_fake_client(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(f"CLAUDE_CLIENT=anthropic\nANTHROPIC_API_KEY={KEY}\n")
+    monkeypatch.chdir(tmp_path)  # Settings reads .env from the working directory
+    for config in (Settings(), app_settings):  # new settings, and the ones the app imported
+        assert config.claude_client == "fake"
+        assert config.anthropic_api_key.get_secret_value() == ""
+    assert isinstance(get_claude_client(), FakeClaudeClient)
 
 
 def test_key_is_hidden_when_settings_are_printed():
