@@ -24,3 +24,5 @@ data/
 .vscode/
 .idea/
 .DS_Store
+pytest-of-*/
+pytest-of-*/
