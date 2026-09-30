@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +26,7 @@ build-backend = "setuptools.build_meta"
 include = ["api*", "ingestion*"]
 
 [tool.pytest.ini_options]
-testpaths = ["api/tests"]
+testpaths = ["api/tests", "ingestion/tests"]
 
 [tool.ruff]
 line-length = 100
