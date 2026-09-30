@@ -28,8 +28,8 @@ sources:
   # Registration
   - url: https://www.desu.edu/admissions/office-records-registration
     topic: registration
-    change_frequency: medium
-    notes: Office of Records & Registration; contacts and registration info.
+    change_frequency: fast
+    notes: Office of Records & Registration; contacts, registration info, and the academic calendar. Dates change every semester.
   - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/registration-planning
     topic: registration
     change_frequency: slow
@@ -61,7 +61,7 @@ sources:
   - url: https://www.desu.edu/admissions/undergraduate-students/how-download-your-satact-score-report
     topic: admissions
     change_frequency: slow
-    notes: Sending SAT/ACT scores to DSU.
+    notes: How students download their own SAT/ACT score report (video and example images, little text). Does not cover sending scores to DSU or give a school code.
 
   # Academics
   - url: https://www.desu.edu/academics/majors-programs

@@ -42,6 +42,8 @@ Questions we expect but have no good source page for yet:
 - **Campus buildings:** no page lists campus buildings or their locations (e.g. "Where's the MLK
   Building?").
 - **Changing majors:** no clear page explains how to switch majors.
+- **Sending SAT/ACT scores:** no page explains how to send scores to DSU or lists DSU's school
+  code. The existing SAT/ACT page only shows students how to download their own score report.
 
 ## Crawling notes
 
