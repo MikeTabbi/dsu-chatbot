@@ -24,6 +24,6 @@ def health() -> dict[str, str]:
 # TODO: POST /chat
 #   1. validate the question
 #   2. retrieve relevant chunks from the search index
-#   3. build the prompt from prompts/ + retrieved chunks
+#   3. build the prompt with api.app.prompt.build_prompt(question, chunks)
 #   4. call Claude, return the answer with source links
 #   5. log the exchange for feedback review
