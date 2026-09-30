@@ -1,0 +1,96 @@
+# DSU pages the chatbot indexes. See ingestion/README.md for how to add a source.
+#
+# Fields (all required):
+#   url:              full https URL on desu.edu
+#   topic:            short lowercase label used to group sources
+#   change_frequency: slow | medium | fast  (how often the page content changes)
+#   notes:            why this page is here / what questions it answers
+
+sources:
+  # Housing
+  - url: https://www.desu.edu/student-life/housing-dining
+    topic: housing
+    change_frequency: medium
+    notes: Housing and dining overview; entry point for on-campus housing questions.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls
+    topic: housing
+    change_frequency: medium
+    notes: List of residence halls.
+  - url: https://www.desu.edu/student-life/housing-dining/apply-housing/housing-comparison-matrix
+    topic: housing
+    change_frequency: slow
+    notes: Side-by-side comparison of halls (room types, amenities).
+  - url: https://www.desu.edu/student-life/housing-dining/food-service-dining
+    topic: housing
+    change_frequency: medium
+    notes: Dining and meal plans. Dining hours are live data and should not be quoted as fixed.
+
+  # Registration
+  - url: https://www.desu.edu/admissions/office-records-registration
+    topic: registration
+    change_frequency: fast
+    notes: Office of Records & Registration; contacts, registration info, and the academic calendar. Dates change every semester.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/registration-planning
+    topic: registration
+    change_frequency: slow
+    notes: Step-by-step class registration in Banner Self-Service.
+
+  # Advising
+  - url: https://www.desu.edu/academics/student-success/academic-advisement/advisement-faqs-resources/advising-faqs
+    topic: advising
+    change_frequency: slow
+    notes: Advising FAQs. Used to explain where students find their own advisor (never guess it).
+  - url: https://www.desu.edu/academics/student-success/academic-advisement/directory
+    topic: advising
+    change_frequency: medium
+    notes: Academic advisement staff directory.
+
+  # Admissions
+  - url: https://www.desu.edu/admissions
+    topic: admissions
+    change_frequency: medium
+    notes: Admissions landing page and office contacts.
+  - url: https://www.desu.edu/admissions/apply-now
+    topic: admissions
+    change_frequency: medium
+    notes: How to apply.
+  - url: https://www.desu.edu/admissions/admissions-resources
+    topic: admissions
+    change_frequency: medium
+    notes: Admissions resources and forms.
+  - url: https://www.desu.edu/admissions/undergraduate-students/how-download-your-satact-score-report
+    topic: admissions
+    change_frequency: slow
+    notes: How students download their own SAT/ACT score report (video and example images, little text). Does not cover sending scores to DSU or give a school code.
+
+  # Academics
+  - url: https://www.desu.edu/academics/majors-programs
+    topic: academics
+    change_frequency: slow
+    notes: List of majors and programs.
+  - url: https://www.desu.edu/academics/course-catalogs
+    topic: academics
+    change_frequency: slow
+    notes: Links to undergraduate and graduate catalogs (updated yearly).
+
+  # Student life
+  - url: https://www.desu.edu/student-life/student-organizations
+    topic: student-life
+    change_frequency: medium
+    notes: Student clubs and organizations.
+
+  # Campus
+  - url: https://www.desu.edu/about/location-directions
+    topic: campus
+    change_frequency: slow
+    notes: Address and directions to campus.
+  - url: https://www.desu.edu/about/campus-contacts
+    topic: campus
+    change_frequency: medium
+    notes: Office contact directory; backs "I don't know, contact X" answers.
+
+  # Accounts
+  - url: https://www.desu.edu/admissions/financial-aid/tuition-fees
+    topic: accounts
+    change_frequency: medium
+    notes: Tuition and fees. Account holds are personal data; point students to the right office.
