@@ -115,7 +115,7 @@ python -m ingestion.chunk --extracted data/extracted-test --out data/chunks-test
 The chunker reads the extractor's Markdown and splits it on headings first: every heading starts
 a new section, and each chunk records its **heading path**, e.g.
 `Housing & Dining > Freshman Residence Halls > Meta V. Jenkins Hall`. Heading lines are not
-repeated in `text`, so retrieval (#12) should embed `heading_path` together with `text`. Headings
+repeated in `text`, so retrieval (#12) indexes `heading_path` together with `text`. Headings
 with no text of their own (e.g. `## Freshman Residence Halls`, followed straight away by the
 first hall) don't produce a chunk, but still appear in their children's paths. Text before the
 first heading uses the page title as its path.
