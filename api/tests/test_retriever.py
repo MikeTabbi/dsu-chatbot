@@ -4,7 +4,14 @@ from dataclasses import asdict
 import pytest
 
 from api.app.config import Settings
-from api.app.retriever import LocalKeywordRetriever, get_retriever, main
+from api.app.retriever import (
+    SYNONYMS_PATH,
+    LocalKeywordRetriever,
+    SynonymsError,
+    get_retriever,
+    load_synonyms,
+    main,
+)
 from ingestion.chunk import Chunk
 
 SITE = "https://www.desu.edu"
@@ -147,3 +154,90 @@ def test_cli_prints_score_title_heading_path_and_url(monkeypatch, capsys):
 
     main(["qwertyuiop"])
     assert "No relevant chunks found." in capsys.readouterr().out
+
+
+SYNONYMS = [["club", "student organization"], ["dorm", "residence hall"]]
+ORG_CHUNKS = [
+    chunk("Student Life > Organizations", "Join a registered student organization.", url="/orgs"),
+    chunk("Student Life > Clubs", "Club sports meet on Fridays.", url="/clubs"),
+    *(
+        chunk(f"Admissions > Step {i}", f"Application step {i}.", url=f"/apply/{i}")
+        for i in range(6)
+    ),
+]
+
+
+def test_synonym_query_finds_the_chunk_in_dsu_wording():
+    plain = LocalKeywordRetriever(ORG_CHUNKS)
+    expanded = LocalKeywordRetriever(ORG_CHUNKS, synonyms=SYNONYMS)
+    assert "/orgs" not in [r.chunk.source_url[len(SITE) :] for r in plain.search("dorms", k=5)]
+    assert expanded.expand("Which dorms are open?") == ["residence hall"]
+    assert expanded.expand("What clubs can I join?") == ["student organization"]
+    results = expanded.search("What organizations can I join?", k=5)
+    assert paths(results)[0] == "Student Life > Organizations"
+    results = LocalKeywordRetriever(CHUNKS, synonyms=[["dorm", "residence halls"]]).search(
+        "dorms", k=3
+    )
+    assert results and all("Residence Halls" in p for p in paths(results))
+
+
+def test_students_own_word_outranks_a_synonym_only_match():
+    retriever = LocalKeywordRetriever(ORG_CHUNKS, synonyms=SYNONYMS)
+    clubs, orgs = (
+        next(r.score for r in retriever.search("clubs", k=5) if r.chunk.heading_path.endswith(e))
+        for e in ("Clubs", "Organizations")
+    )
+    assert clubs > orgs > 0
+    assert paths(retriever.search("student organization", k=1)) == ["Student Life > Organizations"]
+
+
+def test_phrases_match_whole_words_only():
+    retriever = LocalKeywordRetriever([], synonyms=[["hall", "dorm"]])
+    assert retriever.expand("challenge") == []
+    assert retriever.expand("Residence Halls") == ["dorm"]
+
+
+@pytest.mark.parametrize("content", [None, "", "# only comments\n", "groups:\n"])
+def test_empty_or_missing_synonyms_file_falls_back_to_plain_search(tmp_path, content):
+    path = tmp_path / "synonyms.yaml"
+    if content is not None:
+        path.write_text(content)
+    assert load_synonyms(path) == []
+    page = {"url": SITE + "/orgs", "chunks": [asdict(c) for c in ORG_CHUNKS]}
+    (tmp_path / "orgs.json").write_text(json.dumps(page))
+    retriever = get_retriever(Settings(chunks_dir=str(tmp_path), synonyms_file=str(path)))
+    plain = LocalKeywordRetriever(ORG_CHUNKS)
+    assert retriever.expand("clubs") == []
+    assert retriever.search("clubs", k=5) == plain.search("clubs", k=5)
+
+
+def test_synonyms_file_accepts_comma_lines_and_lists(tmp_path):
+    path = tmp_path / "synonyms.yaml"
+    path.write_text("groups:\n  - Club,  Student Organization\n  - [dorm, residence-hall]\n")
+    assert load_synonyms(path) == [["club", "student organization"], ["dorm", "residence hall"]]
+
+
+@pytest.mark.parametrize(
+    "content, message",
+    [
+        ("groups: [club, org", "not valid YAML"),
+        ("- club, organization\n", "one top-level key, 'groups:'"),
+        ("synonyms:\n  - club, organization\n", "one top-level key, 'groups:'"),
+        ("groups: club, organization\n", "'groups' must be a list"),
+        ("groups:\n  - club\n", "group 1 .* needs at least two"),
+        ("groups:\n  - club, , organization\n", "group 1 .* empty entry"),
+        ("groups:\n  - {club: organization}\n", "group 1 .* separated by commas"),
+        ("groups:\n  - club, organization\n  - dorm, clubs\n", "group 2 .* already in group 1"),
+    ],
+)
+def test_bad_synonyms_file_gives_a_clear_error(tmp_path, content, message):
+    path = tmp_path / "synonyms.yaml"
+    path.write_text(content)
+    with pytest.raises(SynonymsError, match=message):
+        load_synonyms(path)
+
+
+def test_repo_synonyms_file_loads():
+    groups = load_synonyms(SYNONYMS_PATH)
+    assert ["club", "organization", "student organization"] in groups
+    assert Settings(_env_file=None).synonyms_file == "api/app/synonyms.yaml"
