@@ -39,8 +39,10 @@ duplicate URLs, and `change_frequency` values other than slow, medium, or fast.
 
 Questions we expect but have no good source page for yet:
 
-- **Campus buildings:** no page lists campus buildings or their locations (e.g. "Where's the MLK
-  Building?").
+- **Campus buildings:** no page lists campus buildings or gives directions to them. A building
+  shows up only when a page mentions it in passing: the Residential Halls page gives the MLK
+  Building's address as part of the Housing office's contact info, so "Where's the MLK Building?"
+  is answerable, but most buildings aren't.
 - **Changing majors:** no clear page explains how to switch majors.
 - **Sending SAT/ACT scores:** no page explains how to send scores to DSU or lists DSU's school
   code. The existing SAT/ACT page only shows students how to download their own score report.

@@ -39,6 +39,12 @@ Categories and how full mode grades them:
 The behavior checks look for marker phrases ("couldn't find", "can't see", "only help", ...) in
 [run.py](run.py). They are heuristics, so read the saved answers before trusting a pass or fail.
 
+Claude words the same answer differently from run to run ("I couldn't find directions" one time,
+"the pages I have don't give directions" the next), so a check can fail on a good answer. Loosen a
+check (a marker, a phrase, an expected URL, or a case's category) only after reading the saved
+answer and confirming it was genuinely correct, and write that reason in the PR. Never loosen a
+check to turn a wrong or guessed answer into a pass.
+
 ## Running it
 
 ```bash
