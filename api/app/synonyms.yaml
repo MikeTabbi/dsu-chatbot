@@ -1,0 +1,21 @@
+# Words students use, grouped with the words DSU's pages use for the same thing.
+#
+# When a question contains any word or phrase in a group, the chatbot also searches for the
+# others in that group. The student's own words still count more than the added ones.
+#
+# To add a group: add a line that starts with "- " and lists the words or phrases, separated by
+# commas. Plurals are matched automatically ("dorms" matches "dorm"); other forms, such as
+# "registration" for "register", need their own entry. A word can be in only one group.
+# Keep groups small and specific: a word that means several things (like "office") pulls in
+# unrelated pages.
+#
+# After editing, check the file loads and see what a question picks up:
+#   python -m api.app.retriever "What clubs can I join?"
+
+groups:
+  - club, organization, student organization
+  - major, program, academic program, degree
+  - dorm, residence hall, hall
+  - meal plan, dining
+  - register, registration, enroll
+  - advisor, adviser, advisement

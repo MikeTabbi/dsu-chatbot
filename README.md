@@ -69,8 +69,42 @@ Details:
   only those returns nothing.
 - **Low-text chunks** (from near-empty pages) keep 80% of their score, so they still show up but
   lose to a normal chunk with a similar score.
-- Keyword search has no synonyms ("dorm" doesn't match "hall") and favors short chunks, so a long
-  table that mentions a word once can rank below a short chunk that repeats other query words.
+- Keyword search favors short chunks, so a long table that mentions a word once can rank below a
+  short chunk that repeats other query words.
+
+### Synonyms
+
+Students don't use DSU's words: they ask about "dorms" and "clubs", and the pages say "residence
+halls" and "student organizations". [api/app/synonyms.yaml](api/app/synonyms.yaml) lists groups of
+words that mean the same thing:
+
+```yaml
+groups:
+  - club, organization, student organization
+  - dorm, residence hall, hall
+```
+
+When a question contains a word or phrase from a group, the retriever also searches for the rest
+of that group. Only the question changes; the index doesn't.
+
+- The student's own words and the added synonyms are searched separately, and a synonym match
+  counts half as much (`SYNONYM_WEIGHT = 0.5`). A chunk that uses the student's exact word ranks
+  above one that only matches a synonym, so a precise question isn't drowned out.
+- Plurals match automatically ("dorms" matches "dorm"). Phrases match whole words in order, so
+  "hall" doesn't match "challenge".
+- The `SYNONYMS_FILE` setting points to the file (default `api/app/synonyms.yaml`). If it's
+  missing or empty, search works as before, without synonyms. A file in the wrong format stops
+  startup with an error that names the bad group.
+
+**To add a group:** add a line under `groups:` that starts with `- ` and lists the words or
+phrases, separated by commas. Other word forms ("registration" for "register") need their own
+entry. A word can be in only one group. Keep groups small and specific: a word with several
+meanings pulls in unrelated pages. Then check what a question picks up, and measure the change:
+
+```bash
+python -m api.app.retriever "What clubs can I join?"   # prints "Synonyms added: ..." and results
+python -m eval.run                                      # retrieval eval, before and after
+```
 
 ## Claude client
 

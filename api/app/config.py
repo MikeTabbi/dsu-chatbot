@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     retriever: str = "local"  # local (keyword search over chunks_dir) | azure (not built yet)
     chunks_dir: str = "data/chunks"
     retriever_min_score: float = 0.1
+    synonyms_file: str = "api/app/synonyms.yaml"  # word groups for the local retriever
     chat_top_k: int = 5  # chunks retrieved per question and passed to Claude
     chat_max_question_chars: int = 1000
     allowed_origins: str = "http://localhost:8000"
