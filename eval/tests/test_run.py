@@ -5,7 +5,8 @@ import pytest
 from pydantic import SecretStr
 
 from api.app.claude_client import ClaudeError, FakeClaudeClient
-from api.app.retriever import LocalKeywordRetriever
+from api.app.main import app, get_chat_client, get_chat_retriever
+from api.app.retriever import LocalKeywordRetriever, ScoredChunk
 from eval import run
 from eval.run import (
     BEHAVIOR_FOR_CATEGORY,
@@ -215,8 +216,22 @@ def test_full_mode_records_claude_errors(cases_csv, retriever):
 
 
 @pytest.fixture
-def patched(monkeypatch, retriever):
-    monkeypatch.setattr(run, "get_chat_retriever", lambda: retriever)
+def patched(retriever):
+    """Swap in the test retriever the way the /chat tests do, so the CLI and /chat both get it."""
+    app.dependency_overrides[get_chat_retriever] = lambda: retriever
+    yield
+    app.dependency_overrides.clear()
+
+
+class RecordingClient:
+    """A stand-in for a real Claude client: not a FakeClaudeClient, so the CLI treats it as real."""
+
+    def __init__(self, answer):
+        self.fake = FakeClaudeClient(answer=answer)
+        self.calls = self.fake.calls
+
+    def complete(self, system, messages):
+        return self.fake.complete(system, messages)
 
 
 def test_cli_retrieval_mode_prints_table_and_saves_results(patched, cases_csv, tmp_path, capsys):
@@ -253,14 +268,28 @@ def test_cli_full_mode_with_real_client_asks_first(
     assert prompts and list(tmp_path.glob("*.json")) == []
 
 
-def test_cli_full_mode_yes_skips_the_prompt(patched, cases_csv, tmp_path, monkeypatch):
-    fake = FakeClaudeClient(answer="I can only help with DSU questions.")
-    monkeypatch.setattr(run, "get_claude_client", lambda config: fake)
-    monkeypatch.setattr(run, "FakeClaudeClient", type("NotFake", (), {}))  # treat it as real
+class EveryChunkRetriever:
+    """Finds the same chunks for any question, so every case reaches Claude."""
+
+    def search(self, question, k=5):
+        return [ScoredChunk(c, 1.0) for c in CHUNKS[:k]]
+
+
+def test_cli_full_mode_yes_skips_the_prompt(patched, cases_csv, tmp_path):
+    client = RecordingClient(answer="I can only help with DSU questions.")
+    app.dependency_overrides[get_chat_retriever] = EveryChunkRetriever
+    app.dependency_overrides[get_chat_client] = lambda: client
 
     def ask(prompt):
         raise AssertionError("asked for confirmation")
 
     args = ["--full", "--yes", "--cases", str(cases_csv), "--out", str(tmp_path)]
     assert main(args, ask=ask) == 0
-    assert len(fake.calls) == 4
+    # every question reached the client, with the test retriever's chunks in the prompt
+    assert len(client.calls) == 4
+    assert all(MATRIX in messages[0]["content"] for _, messages in client.calls)
+    [saved] = tmp_path.glob("*-full.json")
+    results = json.loads(saved.read_text())["results"]
+    assert [r["answer"] for r in results] == ["I can only help with DSU questions."] * 4
+    # the overrides set before main are still in place
+    assert set(app.dependency_overrides) == {get_chat_retriever, get_chat_client}
