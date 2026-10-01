@@ -127,13 +127,18 @@ class FakeClaudeClient:
     model = "fake"
 
     def __init__(self, answer: str | None = None):
-        self.answer = answer  # None: echo the last user message
+        self.answer = answer  # None: echo the last user message, then a <cited> marker
         self.calls: list[tuple[str, list[ChatMessage]]] = []
 
     def complete(self, system: str, messages: list[ChatMessage]) -> ClaudeReply:
         self.calls.append((system, messages))
         question = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-        text = self.answer if self.answer is not None else f"[fake answer] {question}"
+        if self.answer is not None:
+            text = self.answer
+        else:
+            # Cite source 1 when there is one, as Claude would, so /chat shows a source.
+            cited = "1" if '<source id="1">' in question else ""
+            text = f"[fake answer] {question}\n\n<cited>{cited}</cited>"
         input_words = len(system.split()) + sum(len(m["content"].split()) for m in messages)
         reply = ClaudeReply(text, self.model, input_words, len(text.split()))
         log.info(
