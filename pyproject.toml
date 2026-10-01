@@ -28,7 +28,7 @@ build-backend = "setuptools.build_meta"
 include = ["api*", "ingestion*"]
 
 [tool.pytest.ini_options]
-testpaths = ["api/tests", "ingestion/tests"]
+testpaths = ["api/tests", "ingestion/tests", "eval/tests"]
 
 [tool.ruff]
 line-length = 100

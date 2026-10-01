@@ -26,3 +26,6 @@ data/
 .DS_Store
 pytest-of-*/
 pytest-of-*/
+
+# Eval run results
+eval/results/
