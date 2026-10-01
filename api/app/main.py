@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from api.app.claude_client import ClaudeClient, ClaudeError, get_claude_client
 from api.app.config import Settings, settings
-from api.app.prompt import build_prompt
+from api.app.prompt import build_prompt, parse_citations
 from api.app.retriever import Retriever, get_retriever
 from ingestion.chunk import Chunk
 
@@ -54,7 +54,7 @@ class Source(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    sources: list[Source]  # the pages Claude was given, one per URL, best match first
+    sources: list[Source]  # the pages the answer cites, one per URL, best match first
     request_id: str
 
 
@@ -87,7 +87,7 @@ def chat(
     client: Annotated[ClaudeClient, Depends(get_chat_client)],
     config: Annotated[Settings, Depends(get_settings)],
 ):
-    """Answer one question from retrieved DSU content, with the sources Claude was given."""
+    """Answer one question from retrieved DSU content, with the sources the answer cites."""
     request_id = uuid.uuid4().hex
     start = time.perf_counter()
     question = request.question.strip()
@@ -112,12 +112,14 @@ def chat(
             status_code=503, content={"detail": UNAVAILABLE_ANSWER, "request_id": request_id}
         )
 
-    _log_request(request_id, start, chunks, "answered")
-    return ChatResponse(answer=reply.text, sources=_sources(chunks), request_id=request_id)
+    answer = parse_citations(reply.text, len(chunks))
+    cited = [chunks[n - 1] for n in answer.cited]
+    _log_request(request_id, start, chunks, f"answered cited={len(answer.cited)}")
+    return ChatResponse(answer=answer.text, sources=_sources(cited), request_id=request_id)
 
 
 def _sources(chunks: list[Chunk]) -> list[Source]:
-    """One source per URL, in retrieval order; the best-matching chunk names the section."""
+    """One source per URL, in retrieval order; the best-matching cited chunk names the section."""
     by_url: dict[str, Source] = {}
     for c in chunks:
         if c.source_url not in by_url:

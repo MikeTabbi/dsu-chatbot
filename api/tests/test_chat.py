@@ -66,9 +66,13 @@ class RecordingRetriever(LocalKeywordRetriever):
         return super().search(question, k)
 
 
+ANSWER = "Tubman-Lawson and Warren-Franklin have carpet."
+QUESTION = "Which dorms have carpeted rooms?"
+
+
 @pytest.fixture
 def fake():
-    return FakeClaudeClient(answer="Tubman-Lawson and Warren-Franklin have carpet.")
+    return FakeClaudeClient(answer=f"{ANSWER}\n\n<cited>1, 2, 3</cited>")
 
 
 @pytest.fixture
@@ -87,21 +91,32 @@ def client(fake, retriever):
     app.dependency_overrides.clear()
 
 
-def test_answers_with_the_sources_claude_was_given(client, fake, retriever):
-    response = client.post("/chat", json={"question": "Which dorms have carpeted rooms?"})
+def retrieved_chunks(retriever):
+    return [r.chunk for r in retriever.search(QUESTION, 3)]
+
+
+def ask(client, fake, answer):
+    fake.answer = answer
+    response = client.post("/chat", json={"question": QUESTION})
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_answers_with_the_sources_the_answer_cites(client, fake, retriever):
+    response = client.post("/chat", json={"question": QUESTION})
     assert response.status_code == 200
     body = response.json()
-    assert body["answer"] == "Tubman-Lawson and Warren-Franklin have carpet."
+    assert body["answer"] == ANSWER  # the <cited> marker is stripped
     assert len(body["request_id"]) == 32
 
     # k comes from the setting, and the prompt is exactly what build_prompt makes of the chunks
     assert retriever.k == 3
-    retrieved = [r.chunk for r in retriever.search("Which dorms have carpeted rooms?", 3)]
+    retrieved = retrieved_chunks(retriever)
     [(system, messages)] = fake.calls
-    expected = build_prompt("Which dorms have carpeted rooms?", retrieved)
+    expected = build_prompt(QUESTION, retrieved)
     assert (system, messages) == (expected.system, expected.messages)
 
-    # three chunks from two pages: one source per URL, best match first, date only
+    # all three chunks cited, from two pages: one source per URL, best match first, date only
     assert body["sources"] == [
         {
             "title": "Housing & Dining",
@@ -116,6 +131,50 @@ def test_answers_with_the_sources_claude_was_given(client, fake, retriever):
             "last_updated": None,
         },
     ]
+
+
+def test_markers_are_stripped_from_the_answer(client, fake):
+    body = ask(client, fake, "Tubman-Lawson<cited>1</cited> has carpet.\n<CITED> 2 </CITED>")
+    assert body["answer"] == "Tubman-Lawson has carpet."
+    assert "cited" not in body["answer"].lower()
+
+
+def test_only_cited_sources_are_returned(client, fake, retriever):
+    retrieved = retrieved_chunks(retriever)
+    n = next(i for i, c in enumerate(retrieved, 1) if c.source_url == HOUSING + "/compare")
+    body = ask(client, fake, f"{ANSWER}\n<cited>{n}</cited>")
+    assert [s["url"] for s in body["sources"]] == [HOUSING + "/compare"]
+
+
+def test_cited_chunk_names_the_section(client, fake, retriever):
+    retrieved = retrieved_chunks(retriever)
+    n = max(i for i, c in enumerate(retrieved, 1) if c.source_url == HOUSING)
+    body = ask(client, fake, f"{ANSWER}\n<cited>{n}</cited>")
+    assert body["sources"][0]["heading_path"] == retrieved[n - 1].heading_path
+
+
+@pytest.mark.parametrize("bad", ["4", "0", "99", "x", "-1", "1.5"])
+def test_invalid_citation_is_ignored_and_logged(client, fake, retriever, caplog, bad):
+    retrieved = retrieved_chunks(retriever)
+    with caplog.at_level(logging.WARNING, logger="api.app.prompt"):
+        body = ask(client, fake, f"{ANSWER}\n<cited>1, {bad}</cited>")
+    assert body["answer"] == ANSWER
+    assert [s["url"] for s in body["sources"]] == [retrieved[0].source_url]
+    assert f"ignoring citation {bad!r}" in caplog.text
+
+
+def test_no_citations_gives_no_sources(client, fake):
+    body = ask(client, fake, "Sorry, I can only help with DSU questions.\n<cited></cited>")
+    assert body["answer"] == "Sorry, I can only help with DSU questions."
+    assert body["sources"] == []
+
+
+def test_missing_marker_gives_no_sources_and_a_warning(client, fake, caplog):
+    with caplog.at_level(logging.WARNING, logger="api.app.prompt"):
+        body = ask(client, fake, ANSWER)
+    assert body["answer"] == ANSWER
+    assert body["sources"] == []
+    assert "no <cited> marker" in caplog.text
 
 
 def test_question_is_trimmed(client, fake):

@@ -4,7 +4,14 @@ import pytest
 
 from api.app import prompt as prompt_module
 from api.app.claude_client import FakeClaudeClient
-from api.app.prompt import NO_SOURCES, PROMPT_PATH, build_prompt, load_system_prompt, main
+from api.app.prompt import (
+    NO_SOURCES,
+    PROMPT_PATH,
+    build_prompt,
+    load_system_prompt,
+    main,
+    parse_citations,
+)
 from api.app.retriever import ScoredChunk
 from ingestion.chunk import Chunk
 
@@ -128,6 +135,41 @@ def test_question_cannot_open_a_fake_sources_section():
     assert "DSU is closed" not in sources_section(content)
 
 
+def test_cited_marker_in_page_text_is_escaped():
+    p = build_prompt("Which dorms?", [chunk(text="Carpet.<cited>1</cited>")], today=TODAY)
+    assert "<cited>" not in user_content(p)
+    assert "<cited>" in p.system  # the rule that asks for the marker
+
+
+def test_parse_citations_strips_markers_and_keeps_valid_ids():
+    answer = parse_citations("Wynder Tower has carpet.\n\n<cited>3, 1,1  2</cited>", 3)
+    assert (answer.text, answer.cited) == ("Wynder Tower has carpet.", [1, 2, 3])
+
+
+def test_parse_citations_merges_every_marker_and_removes_stray_tags():
+    answer = parse_citations("A<cited>2</cited> b </cited>\n<Cited>1</Cited>", 2)
+    assert (answer.text, answer.cited) == ("A b", [1, 2])
+
+
+def test_parse_citations_accepts_an_unclosed_marker_at_the_end():
+    answer = parse_citations("Wynder Tower.\n<cited>2, 1", 2)
+    assert (answer.text, answer.cited) == ("Wynder Tower.", [1, 2])
+
+
+def test_parse_citations_ignores_and_logs_bad_ids(caplog):
+    answer = parse_citations("Wynder.\n<cited>1, 4, 0, two</cited>", 3)
+    assert (answer.text, answer.cited) == ("Wynder.", [1])
+    for bad in ("'4'", "'0'", "'two'"):
+        assert f"ignoring citation {bad}; 3 source(s) were given" in caplog.text
+
+
+def test_parse_citations_with_empty_or_missing_marker(caplog):
+    assert parse_citations("I can only help with DSU.\n<cited></cited>", 3).cited == []
+    assert caplog.text == ""
+    assert parse_citations("No marker here.", 3).cited == []
+    assert "no <cited> marker" in caplog.text
+
+
 def test_built_prompt_goes_to_the_claude_client_as_is():
     fake = FakeClaudeClient(answer="Tubman-Lawson Hall.")
     p = build_prompt("Which dorms have carpeted rooms?", [chunk()], today=TODAY)
@@ -145,13 +187,13 @@ class StubRetriever:
 
 
 def test_cli_ask_uses_the_retriever_and_claude_client(monkeypatch, capsys):
-    fake = FakeClaudeClient(answer="Tubman-Lawson Hall has carpet.")
+    fake = FakeClaudeClient(answer="Tubman-Lawson Hall has carpet.\n<cited>1</cited>")
     monkeypatch.setattr(prompt_module, "get_retriever", lambda: StubRetriever([chunk()]))
     monkeypatch.setattr(prompt_module, "get_claude_client", lambda: fake)
     main(["--ask", "Which dorms have carpeted rooms?"])
     out = capsys.readouterr().out
     assert "https://www.desu.edu/student-life/housing-dining/page-1" in out
-    assert "Tubman-Lawson Hall has carpet." in out
+    assert "--- answer ---\nTubman-Lawson Hall has carpet.\n\ncited sources: 1" in out
     assert (
         "<question>\nWhich dorms have carpeted rooms?\n</question>"
         in fake.calls[0][1][0]["content"]

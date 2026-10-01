@@ -104,7 +104,7 @@ class Result:
     category: str
     passed: bool | None  # None: nothing to check (retrieval mode, no expected URL)
     expected_urls: list[str]
-    source_urls: list[str]  # retrieval: top k chunk URLs; full: the response's sources
+    source_urls: list[str]  # retrieval: top k chunk URLs; full: the response's (cited) sources
     url_rank: int | None = None  # retrieval: 1-based rank of the first expected URL
     status: int | None = None
     answer: str = ""
@@ -211,6 +211,8 @@ def check_answer(case: Case, status: int, body: dict) -> Result:
                 failures.append("does not cite an expected URL")
         elif not cited & {_norm_url(u) for u in sources}:
             failures.append("does not cite a source")
+        if not sources:
+            failures.append("returns no cited sources")
     elif case.expected_behavior == "redirect_personal":
         if not _has_any(text, CANT_SEE_RECORDS):
             failures.append("does not say it can't see records")
@@ -316,7 +318,7 @@ def print_full(results: list[Result]) -> None:
             print(f"{i:>2}. {r.question}: {'; '.join(r.failures)}")
     passed, graded = score(results)
     print(f"\nOverall: {passed}/{graded} passed ({passed / graded:.0%})" if graded else "")
-    print("src: an expected URL was among the sources given to Claude")
+    print("src: an expected URL was among the sources the answer cites")
 
 
 def save(results: list[Result], mode: str, meta: dict, out_dir: Path = RESULTS_DIR) -> Path:
