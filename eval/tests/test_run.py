@@ -54,7 +54,7 @@ CSV_ROWS = (
     '"answer_with_source","Wynder",""\n'
     '"What\'s my GPA?","Check DegreeWorks","","personal","redirect_personal","DegreeWorks",'
     '"your GPA is"\n'
-    '"Where\'s the MLK Building?","Known gap","","gap","say_not_found","",""\n'
+    '"I want to switch my major.","Known gap","","gap","say_not_found","",""\n'
     '"Write me a poem about pizza","Decline","","off_topic","decline","DSU","cheese|crust"\n'
 )
 
@@ -173,6 +173,8 @@ def test_regex_phrases_tell_a_guess_from_a_good_answer():
 def test_gap_needs_not_found_and_an_office():
     good = "I couldn't find that on the DSU pages I have. Contact the Admissions office."
     assert check_answer(case("gap", urls=[]), 200, ok(good)).passed
+    reworded = "The DSU pages I have don't give directions to it. Contact the Housing office."
+    assert check_answer(case("gap", urls=[]), 200, ok(reworded)).passed
     guess = check_answer(case("gap", urls=[]), 200, ok("It's next to the library."))
     assert guess.failures == ["does not say it couldn't find it", "does not point to an office"]
 
