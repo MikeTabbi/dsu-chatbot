@@ -36,7 +36,7 @@ Check it's running: http://localhost:8000/health
 
 ## Retrieval
 
-`/chat` will depend only on the `Retriever` interface in [api/app/retriever.py](api/app/retriever.py):
+`/chat` depends only on the `Retriever` interface in [api/app/retriever.py](api/app/retriever.py):
 `search(question, k)` returns the top `k` chunks, best first, each with a `score` and the full
 chunk (`source_url`, `title`, `heading_path`, `modified_time`, `low_text`, `text`, ...). An empty
 list means nothing relevant was found. The `RETRIEVER` setting picks the implementation: `local`
@@ -74,7 +74,7 @@ Details:
 
 ## Claude client
 
-`/chat` will depend only on the `ClaudeClient` interface in
+`/chat` depends only on the `ClaudeClient` interface in
 [api/app/claude_client.py](api/app/claude_client.py): `complete(system, messages)` returns the
 answer `text` plus the `model` that answered and its `input_tokens` / `output_tokens`. Any
 failure (timeout, rate limit, connection, API error, refusal or empty answer) raises one
@@ -120,6 +120,46 @@ point a student in distress to DSU Counseling Services (and 911 or 988 in an eme
 ```bash
 python -m api.app.prompt "Which dorms have carpeted rooms?"                            # print the prompt
 CLAUDE_CLIENT=anthropic python -m api.app.prompt --ask "Which dorms have carpeted rooms?"  # real answer
+```
+
+## Chat endpoint
+
+`POST /chat` takes `{"question": "..."}` and returns the answer, the sources Claude was given, and
+a request ID:
+
+```json
+{
+  "answer": "According to the Housing Comparison Matrix, ...",
+  "sources": [
+    {
+      "title": "Housing Comparison Matrix",
+      "heading_path": "Housing Comparison Matrix",
+      "url": "https://www.desu.edu/student-life/housing-dining/apply-housing/housing-comparison-matrix",
+      "last_updated": "2022-03-04"
+    }
+  ],
+  "request_id": "d77201d2bd3540c1b2925eb132bf0871"
+}
+```
+
+- The question is trimmed. An empty question, or one over `CHAT_MAX_QUESTION_CHARS` (default
+  1000), gets a 422 with a plain `detail` message.
+- It retrieves `CHAT_TOP_K` chunks (default 5), builds the prompt with `build_prompt`, and calls
+  the Claude client. `sources` lists those chunks' pages, one entry per URL, best match first;
+  `last_updated` is a `YYYY-MM-DD` date or `null`.
+- When retrieval finds nothing, it answers "couldn't find anything" with no sources and does not
+  call Claude.
+- If Claude fails (`ClaudeError`), it returns a 503 with a friendly `detail` and the `request_id`,
+  never error details.
+- Each request logs its request ID, number of chunks, latency, and outcome. The question itself
+  is not logged yet (#8).
+
+The retriever and Claude client are FastAPI dependencies (`get_chat_retriever`,
+`get_chat_client`), built once; tests swap in fakes with `app.dependency_overrides`.
+
+```bash
+CLAUDE_CLIENT=anthropic uvicorn api.app.main:app
+python -c "import httpx; print(httpx.post('http://localhost:8000/chat', json={'question': 'How do I register for classes?'}, timeout=60).json())"
 ```
 
 ## Tests and linting
