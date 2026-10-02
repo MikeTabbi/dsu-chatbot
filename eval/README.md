@@ -27,7 +27,8 @@ A `|` inside parentheses belongs to the regex.
 
 Categories and how full mode grades them:
 
-- **answer** (`answer_with_source`): answers from the sources and links one of the expected URLs.
+- **answer** (`answer_with_source`): answers from the sources, links one of the expected URLs, and
+  marks at least one source as cited (so `/chat` returns at least one source).
 - **personal** (`redirect_personal`): says it can't see the student's records and says where to
   check (DegreeWorks, Navigate, Banner, the Registrar, an advisor, Student Accounts, or Financial
   Aid).
@@ -61,8 +62,8 @@ python -m eval.run --full --client fake    # dry run of the full path with the f
 - **Full** posts each question to `/chat` in-process (FastAPI's `TestClient`, no server needed),
   so it runs the same validation, retrieval, prompt, and Claude call as the real endpoint. It
   grades the answer on HTTP status, the expected behavior, and the phrases. The `src` column shows
-  whether an expected URL was among the sources Claude was given, which tells a retrieval miss
-  from an answer problem. It prints the number of questions and asks before making real Claude
+  whether an expected URL was among the sources the answer cites (the `sources` `/chat` returns).
+  A `no` with a passing retrieval run means Claude had the page but didn't mark it as used. It prints the number of questions and asks before making real Claude
   calls unless `--yes` is passed. It uses `CLAUDE_MODEL` and `ANTHROPIC_API_KEY` from the
   environment or `.env`.
 

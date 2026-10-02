@@ -148,6 +148,17 @@ def test_answer_fails_without_the_expected_citation_or_a_phrase():
     assert result.failures == ["does not cite an expected URL", "missing: 'Learning Commons'"]
 
 
+def test_answer_fails_when_it_returns_no_cited_sources():
+    answer = f"Wynder Tower has carpet.\n\nSource: [Housing Comparison Matrix]({MATRIX})"
+    result = check_answer(case(), 200, ok(answer, sources=()))
+    assert result.failures == ["returns no cited sources"]
+
+
+def test_non_answer_cases_may_return_no_sources():
+    good = "Sorry, I can only help with DSU questions."
+    assert check_answer(case("off_topic", urls=[]), 200, ok(good, sources=())).passed
+
+
 def test_personal_needs_cant_see_and_where_to_check():
     good = "I can’t see your records. Check DegreeWorks for your GPA."
     assert check_answer(case("personal", urls=[], contain=["DegreeWorks"]), 200, ok(good)).passed
@@ -197,10 +208,11 @@ def test_error_status_fails():
 
 
 def test_full_mode_goes_through_chat_with_the_given_client(cases_csv, retriever):
-    fake = FakeClaudeClient(answer=f"Wynder Tower. Source: [Matrix]({MATRIX})")
+    fake = FakeClaudeClient(answer=f"Wynder Tower. Source: [Matrix]({MATRIX})\n<cited>1</cited>")
     [result] = run_full(load_cases(cases_csv)[:1], fake, retriever, k=2)
     assert result.status == 200 and result.passed
-    assert result.source_urls[0] == MATRIX
+    assert result.source_urls == [MATRIX]  # only the cited source, not the dining chunk
+    assert "<cited>" not in result.answer
     [(_, messages)] = fake.calls
     assert "<question>\nWhich dorms have carpeted rooms?\n</question>" in messages[0]["content"]
     assert MATRIX in messages[0]["content"]

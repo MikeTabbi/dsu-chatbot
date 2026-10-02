@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 from types import SimpleNamespace
 
 import anthropic
@@ -15,6 +16,8 @@ from api.app.claude_client import (
 )
 from api.app.config import Settings
 from api.app.config import settings as app_settings
+from api.app.prompt import build_prompt, parse_citations
+from api.tests.test_prompt import chunk
 
 KEY = "sk-ant-test-not-a-real-key"
 SYSTEM = "You answer questions about Delaware State University."
@@ -150,10 +153,22 @@ def test_key_is_hidden_when_settings_are_printed():
 def test_fake_client_is_predictable_and_records_calls():
     fake = FakeClaudeClient()
     reply = fake.complete(SYSTEM, MESSAGES)
-    assert reply.text == "[fake answer] When does housing open?"
+    assert reply.text == "[fake answer] When does housing open?\n\n<cited></cited>"
     assert reply.model == "fake" and reply.input_tokens > 0 and reply.output_tokens > 0
     assert fake.calls == [(SYSTEM, MESSAGES)]
     assert FakeClaudeClient("Canned.").complete(SYSTEM, MESSAGES).text == "Canned."
+
+
+def test_fake_client_cites_source_1_only_when_the_prompt_has_sources():
+    with_sources = build_prompt("Which dorms?", [chunk()], today=date(2026, 10, 1))
+    reply = FakeClaudeClient().complete(with_sources.system, with_sources.messages)
+    assert reply.text.endswith("\n\n<cited>1</cited>")
+    assert parse_citations(reply.text, 1).cited == [1]
+
+    no_sources = build_prompt("Which dorms?", [], today=date(2026, 10, 1))
+    reply = FakeClaudeClient().complete(no_sources.system, no_sources.messages)
+    assert reply.text.endswith("\n\n<cited></cited>")
+    assert parse_citations(reply.text, 0).cited == []
 
 
 def test_client_is_selected_by_config():

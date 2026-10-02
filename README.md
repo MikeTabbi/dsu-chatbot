@@ -148,8 +148,13 @@ point a student in distress to DSU Counseling Services (and 911 or 988 in an eme
 - Each chunk is a numbered `<source>` with its title, heading path (`Section`), URL, last-updated
   date, and text. Dates more than a year old are marked "(more than a year ago)".
 - With no chunks, the sources section says "No DSU sources were found for this question."
-- Those section tags are escaped inside page text and the question, so neither can close a
-  section early and pose as the other.
+- Those section tags (and `<cited>`) are escaped inside page text and the question, so neither
+  can close a section early and pose as the other, or plant a citation.
+
+Claude ends every answer with a `<cited>1, 3</cited>` line naming the source ids it used
+(`<cited></cited>` when it used none). `parse_citations(answer, source_count)` strips every marker
+from the text and returns the valid ids. A missing marker, a non-number, or an id with no matching
+source is logged as a warning and ignored, so it never crashes and never shows an unused source.
 
 ```bash
 python -m api.app.prompt "Which dorms have carpeted rooms?"                            # print the prompt
@@ -158,7 +163,7 @@ CLAUDE_CLIENT=anthropic python -m api.app.prompt --ask "Which dorms have carpete
 
 ## Chat endpoint
 
-`POST /chat` takes `{"question": "..."}` and returns the answer, the sources Claude was given, and
+`POST /chat` takes `{"question": "..."}` and returns the answer, the sources the answer cites, and
 a request ID:
 
 ```json
@@ -179,13 +184,16 @@ a request ID:
 - The question is trimmed. An empty question, or one over `CHAT_MAX_QUESTION_CHARS` (default
   1000), gets a 422 with a plain `detail` message.
 - It retrieves `CHAT_TOP_K` chunks (default 5), builds the prompt with `build_prompt`, and calls
-  the Claude client. `sources` lists those chunks' pages, one entry per URL, best match first;
-  `last_updated` is a `YYYY-MM-DD` date or `null`.
+  the Claude client. `sources` lists the pages of the chunks Claude marked as cited (see
+  [System prompt](#system-prompt)), one entry per URL, best match first; `last_updated` is a
+  `YYYY-MM-DD` date or `null`. An answer that cites nothing (a records redirect, an off-topic
+  decline) has an empty `sources` list. The `<cited>` marker never appears in `answer`.
 - When retrieval finds nothing, it answers "couldn't find anything" with no sources and does not
   call Claude.
 - If Claude fails (`ClaudeError`), it returns a 503 with a friendly `detail` and the `request_id`,
   never error details.
-- Each request logs its request ID, number of chunks, latency, and outcome. The question itself
+- Each request logs its request ID, number of chunks, latency, and outcome (with the number of
+  cited chunks when answered). The question itself
   is not logged yet (#8).
 
 The retriever and Claude client are FastAPI dependencies (`get_chat_retriever`,
