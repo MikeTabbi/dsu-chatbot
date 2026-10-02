@@ -33,6 +33,7 @@ BEHAVIOR_FOR_CATEGORY = {
 NOT_FOUND = (
     "couldn't find",
     "could not find",
+    "didn't find",
     "wasn't able to find",
     "not able to find",
     "don't have information",
@@ -83,8 +84,6 @@ WHERE_TO_CHECK = (
     "financial aid",
 )
 DECLINES = ("only help", "can only", "only answer", "dsu question", "questions about dsu")
-
-URL = re.compile(r"https?://[^\s)\]>\"'*]+")
 
 
 @dataclass
@@ -205,14 +204,13 @@ def check_answer(case: Case, status: int, body: dict) -> Result:
     text = _norm_text(answer)
 
     if case.expected_behavior == "answer_with_source":
-        cited = {_norm_url(u) for u in URL.findall(answer)}
-        if case.expected_urls:
-            if not cited & {_norm_url(u) for u in case.expected_urls}:
-                failures.append("does not cite an expected URL")
-        elif not cited & {_norm_url(u) for u in sources}:
-            failures.append("does not cite a source")
+        # The widget shows the cited sources as cards, so the answer text has no "Source:" line.
         if not sources:
             failures.append("returns no cited sources")
+        elif case.expected_urls and not {_norm_url(u) for u in sources} & {
+            _norm_url(u) for u in case.expected_urls
+        }:
+            failures.append("does not cite an expected URL")
     elif case.expected_behavior == "redirect_personal":
         if not _has_any(text, CANT_SEE_RECORDS):
             failures.append("does not say it can't see records")

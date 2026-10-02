@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DSU chat widget demo</title>
+    <style>
+      /* A stand-in for a dsu.edu page. Its CSS should not change how the widget looks. */
+      body {
+        margin: 0;
+        font-family: Georgia, serif;
+        color: #222;
+        line-height: 1.6;
+      }
+      header {
+        padding: 16px 24px;
+        background: #222;
+        color: #fff;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      button {
+        background: yellow; /* page styles like this must not reach the widget */
+      }
+
+      /* Branding example: uncomment to try other colors.
+      :root {
+        --dsu-chat-accent: #0b3d91;
+        --dsu-chat-font: Georgia, serif;
+      }
+      */
+    </style>
+  </head>
+  <body>
+    <header><strong>Delaware State University</strong> (widget demo page)</header>
+    <main>
+      <h1>Chat widget demo</h1>
+      <p>
+        This page loads the widget the same way dsu.edu would: one script tag. Click
+        <strong>Ask DSU</strong> in the bottom-right corner and ask a question, for example
+        "Which dorms have carpeted rooms?".
+      </p>
+      <p>
+        The backend must be running on http://localhost:8000 and allow this page's origin
+        (http://localhost:8080). See widget/README.md.
+      </p>
+    </main>
+
+    <script src="dsu-chat.js" data-api-url="http://localhost:8000" defer></script>
+  </body>
+</html>

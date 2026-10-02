@@ -17,3 +17,8 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Widget tests (no npm install needed)
+        run: node --test widget/tests/*.test.js

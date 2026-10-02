@@ -27,8 +27,9 @@ A `|` inside parentheses belongs to the regex.
 
 Categories and how full mode grades them:
 
-- **answer** (`answer_with_source`): answers from the sources, links one of the expected URLs, and
-  marks at least one source as cited (so `/chat` returns at least one source).
+- **answer** (`answer_with_source`): answers from the sources, and one of the expected URLs is among
+  the sources `/chat` returns as cited. The widget shows those as source cards, so the answer text
+  doesn't need to repeat the link (a link only in the text doesn't count).
 - **personal** (`redirect_personal`): says it can't see the student's records and says where to
   check (DegreeWorks, Navigate, Banner, the Registrar, an advisor, Student Accounts, or Financial
   Aid).
