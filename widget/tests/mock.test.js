@@ -61,6 +61,7 @@ test("mock mode never makes a network request", async () => {
     "Write me a poem (off topic)",
     "Where is DSU? (slow)",
     "Where is DSU? (503)",
+    "Where is DSU? (rate limit)",
     "Where is DSU? (network)",
     "Where is DSU? (too long)",
     "anything else",
@@ -101,6 +102,20 @@ test("each state gives the reply the widget expects", async () => {
   assert.equal(typeof (await tooLong.json()).detail, "string");
 
   await assert.rejects(ask(window, "(network)"), TypeError);
+});
+
+test("the rate-limited state is a 429 the widget shows as the API's message, offline", async () => {
+  const { errorMessage } = require("../dsu-chat.js");
+  const { window, network } = loadMock("?mock=1");
+  for (const question of ["Where is DSU? (rate limit)", "(429)"]) {
+    const response = await ask(window, question);
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("Retry-After"), "45");
+    const body = await response.json();
+    assert.match(body.detail, /wait a minute/);
+    assert.equal(errorMessage(response.status, body), body.detail);
+  }
+  assert.deepEqual(network, []);
 });
 
 test("thumbs up/down in mock mode succeed with no network request", async () => {

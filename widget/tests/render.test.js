@@ -12,6 +12,7 @@ const {
   renderMarkdown,
   formatDate,
   feedbackRequest,
+  errorMessage,
 } = require("../dsu-chat.js");
 
 const ALLOWED_TAGS = new Set(["p", "ul", "ol", "li", "strong", "em", "a", "br", "span"]);
@@ -143,4 +144,12 @@ test("dates for source cards", () => {
   assert.equal(formatDate("2022-03-04"), "March 4, 2022");
   assert.equal(formatDate(null), null);
   assert.equal(formatDate("<b>soon</b>"), null);
+});
+
+test("error messages: the API's own words for 422, 429, and 503, else the widget's", () => {
+  const detail = "Please wait a minute and try again.";
+  for (const status of [422, 429, 503]) assert.equal(errorMessage(status, { detail }), detail);
+  assert.match(errorMessage(429, null), /wait a minute/); // e.g. a proxy's 429 with no JSON
+  assert.match(errorMessage(503, { detail: 7 }), /can't answer right now/);
+  assert.match(errorMessage(500, { detail }), /Something went wrong/); // never an unknown error's text
 });

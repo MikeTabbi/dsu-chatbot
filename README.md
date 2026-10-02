@@ -197,9 +197,10 @@ a request ID:
   cited chunks when answered) to the app log. The question is never in the app log; a redacted
   copy goes to the [exchange log](#exchange-log-and-feedback).
 
-The retriever, Claude client, and exchange log are FastAPI dependencies (`get_chat_retriever`,
-`get_chat_client`, `get_chat_exchange_log`), built once; tests swap in fakes with
-`app.dependency_overrides`.
+The retriever, Claude client, exchange log, and rate limiter are FastAPI dependencies
+(`get_chat_retriever`, `get_chat_client`, `get_chat_exchange_log`, `get_chat_rate_limiter`), built
+once; tests swap in fakes with `app.dependency_overrides`. `/chat` and `/feedback` are also
+[rate limited](#rate-limits-and-abuse-protection).
 
 ```bash
 CLAUDE_CLIENT=anthropic uvicorn api.app.main:app
@@ -269,6 +270,55 @@ running the demo page locally (`python -m http.server 8080 --directory widget`).
 Browsers only let a page call the API if its site is listed in `ALLOWED_ORIGINS` (exact sites,
 comma-separated). The default allows the local demo page (`http://localhost:8080`); production
 lists DSU's site. `*` is refused at startup, so the API is never open to every site.
+
+## Rate limits and abuse protection
+
+Once the widget is public, anyone can call the API, so no single client (or bot) may use up the
+Claude credits or tie up the server. [api/app/rate_limit.py](api/app/rate_limit.py) and
+[api/app/request_guard.py](api/app/request_guard.py) do this; every number is a setting.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `RATE_LIMIT_CHAT_PER_MINUTE` | 10 | `/chat` requests per client per minute |
+| `RATE_LIMIT_CHAT_PER_DAY` | 100 | `/chat` requests per client per UTC day |
+| `RATE_LIMIT_FEEDBACK_PER_MINUTE` | 30 | `/feedback` requests per client per minute |
+| `CLAUDE_DAILY_CALL_BUDGET` | 2000 | Claude calls per UTC day from all clients together |
+| `TRUST_PROXY` | false | read the client IP from `X-Forwarded-For` (turn on behind Azure App Service) |
+| `MAX_REQUEST_BYTES` | 16384 | largest `/chat` or `/feedback` body |
+| `RATE_LIMITER` | memory | `memory` (counters in this process) or `none` (no limits or budget) |
+
+A limit set to 0 is off. `/health` is never limited.
+
+- **Per-client limits:** a client over a limit gets a **429** with a `Retry-After` header (seconds
+  until the minute, or the UTC day, resets) and a friendly `detail` the widget shows as is, plus
+  a `request_id`. Limited requests aren't counted, and don't reach retrieval or Claude. Requests
+  that fail validation do count.
+- **Daily budget:** caps Claude calls across *all* clients, so credits are safe even when abuse
+  comes from many addresses. Past it, `/chat` doesn't call Claude and returns a **503** with
+  "The DSU assistant is busy right now..." and a `Retry-After` until midnight UTC. Questions
+  retrieval finds nothing for never call Claude, so they don't count. Each call is at most
+  `CLAUDE_MAX_OUTPUT_TOKENS` out, so calls × that bounds the output spend.
+- **Who a client is:** the connecting IP address (IPv6 per /64 block, what one home or phone
+  usually gets). `X-Forwarded-For` is ignored unless `TRUST_PROXY` is on, since anyone can send
+  it; when on, the last entry (the one the proxy added) is used and a port is dropped. Only turn
+  it on when every request comes through a proxy that sets the header.
+- **Bodies:** `POST /chat` and `POST /feedback` must be `Content-Type: application/json` (else
+  **415**) and at most `MAX_REQUEST_BYTES` (else **413**), checked before the body is read in full.
+- **Logs:** rate-limit, budget, and rejected-body events log the request ID and outcome (for example
+  `outcome=rate_limited limit=chat_per_minute`), never the question or the client's address.
+
+**Why no library:** limiting needs a counter per client per window; that's about 50 lines with a
+lock, tested with a fake clock (`InMemoryRateLimiter(clock=...)`). slowapi and similar wrap the
+same idea in decorators and storage backends we don't need yet, and add a dependency. The windows
+are fixed (they reset on the minute and at midnight UTC), so a client can get up to twice a limit
+across one reset, which is fine for this.
+
+**More than one server instance:** the counters live in each process's memory, so two instances
+each allow the full limits and budget, and a restart resets them. Before scaling out, add a shared
+store (Redis, for example) behind the `RateLimiter` interface and select it with `RATE_LIMITER`.
+
+`python -m eval.run --full` turns the limits and budget off for its run, since every case comes
+from one place.
 
 ## Tests and linting
 

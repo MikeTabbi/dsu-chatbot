@@ -74,7 +74,8 @@ Only these variables cross that boundary.
   mistakes, not to share personal information, and to contact the office for official decisions.
 - **Errors:** a too-long or empty question shows a message under the box without calling the
   API. If the API is unavailable (503), the network fails, or the request takes over 60 seconds,
-  the widget says so in plain words and puts the question back in the box to send again.
+  the widget says so in plain words and puts the question back in the box to send again. When the
+  API says to slow down (429) or that it's busy, the widget shows the API's own message.
 - **Accessibility:** everything works with the keyboard (Tab, Enter to send, Shift+Enter for a
   new line, Escape to close). Focus is always visible. Buttons and the question box have labels,
   new answers are read out by screen readers (the conversation is an `aria-live` region), and
@@ -137,6 +138,7 @@ word in quotes does the same:
 | Personal-data redirect, no sources | "personal" |
 | Off-topic decline | "off topic" |
 | Loading dots for 5 seconds, then the short answer | "slow" |
+| Too many questions (429), the API's "please wait" message | "rate limit" |
 | Unavailable (503) | "503" |
 | Network error | "network" |
 | Question too long, as the API reports it | "too long" |
