@@ -209,7 +209,8 @@ python -c "import httpx; print(httpx.post('http://localhost:8000/chat', json={'q
 
 [widget/](widget/) is the chat window for dsu.edu: plain JavaScript and CSS, embedded with one
 script tag, no build step. See [widget/README.md](widget/README.md) for embedding, branding, and
-running the demo page locally (`python -m http.server 8080 --directory widget`).
+running the demo page locally (`python -m http.server 8080 --directory widget`). Open
+`demo.html?mock=1` to try it with saved answers and no backend.
 
 Browsers only let a page call the API if its site is listed in `ALLOWED_ORIGINS` (exact sites,
 comma-separated). The default allows the local demo page (`http://localhost:8080`); production
