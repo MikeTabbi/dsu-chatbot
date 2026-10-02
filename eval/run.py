@@ -14,7 +14,14 @@ from fastapi.testclient import TestClient
 
 from api.app.claude_client import ClaudeClient, FakeClaudeClient, get_claude_client
 from api.app.config import settings
-from api.app.main import app, get_chat_client, get_chat_retriever, get_settings
+from api.app.exchange_log import NullExchangeLog
+from api.app.main import (
+    app,
+    get_chat_client,
+    get_chat_exchange_log,
+    get_chat_retriever,
+    get_settings,
+)
 from api.app.retriever import Retriever
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -249,6 +256,8 @@ def run_full(
     given client, and grade the response. Overrides already set on the app are restored after."""
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_chat_client] = lambda: client
+    # Eval questions aren't students', so they stay out of the exchange log and its review.
+    app.dependency_overrides[get_chat_exchange_log] = NullExchangeLog
     if retriever is not None:
         app.dependency_overrides[get_chat_retriever] = lambda: retriever
     if k is not None:

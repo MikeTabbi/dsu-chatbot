@@ -6,7 +6,13 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { isSafeUrl, parseMarkdown, renderMarkdown, formatDate } = require("../dsu-chat.js");
+const {
+  isSafeUrl,
+  parseMarkdown,
+  renderMarkdown,
+  formatDate,
+  feedbackRequest,
+} = require("../dsu-chat.js");
 
 const ALLOWED_TAGS = new Set(["p", "ul", "ol", "li", "strong", "em", "a", "br", "span"]);
 
@@ -123,6 +129,14 @@ test("a numbered list split by blank lines keeps its numbering", () => {
 
 test("unclosed markers stay as text", () => {
   assert.equal(render("5 * 3 and **open").html, "<p>5 * 3 and **open</p>");
+});
+
+test("thumbs buttons post the request ID and rating to /feedback", () => {
+  const [url, init] = feedbackRequest("https://api.example.edu", "abc123", "down");
+  assert.equal(url, "https://api.example.edu/feedback");
+  assert.equal(init.method, "POST");
+  assert.equal(init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(init.body), { request_id: "abc123", rating: "down" });
 });
 
 test("dates for source cards", () => {

@@ -4,7 +4,9 @@
 questions before launch and run it whenever prompts, retrieval, or the model change.
 
 Good sources for questions: office FAQ pages, common emails to admissions/financial aid/registrar,
-front desk logs.
+front desk logs, and thumbs-down answers from the widget (`python -m api.app.exchange_log review`,
+see the main README). Questions there are already redacted; keep any placeholder like `[email]`
+out of a new case's wording.
 
 ## The eval set
 

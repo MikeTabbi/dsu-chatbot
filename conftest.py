@@ -20,4 +20,6 @@ for _name in config.Settings.model_fields:
     os.environ.pop(_name.upper(), None)
 
 config.Settings.model_config["env_file"] = None  # also covers Settings(...) built inside tests
-config.settings = config.Settings()
+# Exchanges a test sends to /chat go to a throwaway file, never data/exchanges.
+_exchanges = os.path.join(tempfile.mkdtemp(prefix="dsu-exchanges-"), "exchanges.sqlite")
+config.settings = config.Settings(exchange_log_path=_exchanges)
