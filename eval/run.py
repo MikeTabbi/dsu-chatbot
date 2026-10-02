@@ -248,7 +248,8 @@ def run_full(
     k: int | None = None,
 ) -> list[Result]:
     """Post each question to /chat in-process (the same code path as the server), with the
-    given client, and grade the response."""
+    given client, and grade the response. Overrides already set on the app are restored after."""
+    saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_chat_client] = lambda: client
     if retriever is not None:
         app.dependency_overrides[get_chat_retriever] = lambda: retriever
@@ -265,6 +266,13 @@ def run_full(
             return results
     finally:
         app.dependency_overrides.clear()
+        app.dependency_overrides.update(saved)
+
+
+def _resolve(dependency: Callable, default: Callable):
+    """What /chat would get for this dependency: the app's override (as the /chat tests set one)
+    if there is one, else default()."""
+    return app.dependency_overrides.get(dependency, default)()
 
 
 def _short(text: str, width: int) -> str:
@@ -369,7 +377,7 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
     cases = load_cases(args.cases)
     if args.category:
         cases = [c for c in cases if c.category == args.category]
-    retriever = get_chat_retriever()
+    retriever = _resolve(get_chat_retriever, get_chat_retriever)
 
     if not args.full:
         results = run_retrieval(cases, retriever, args.k)
@@ -379,7 +387,7 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
         return 0
 
     config = settings.model_copy(update={"claude_client": args.client})
-    client = get_claude_client(config)
+    client = _resolve(get_chat_client, lambda: get_claude_client(config))
     real = not isinstance(client, FakeClaudeClient)
     if real and not args.yes and not confirm(len(cases), config.claude_model, ask):
         print("Cancelled; no Claude calls made.")
