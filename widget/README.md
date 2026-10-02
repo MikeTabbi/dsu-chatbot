@@ -9,12 +9,12 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 
 | File | What it does |
 |---|---|
-| `dsu-chat.js` | Everything: the button, the panel, the call to `/chat`, Markdown rendering |
+| `dsu-chat.js` | Everything: the button, the panel, the calls to `/chat` and `/feedback`, Markdown rendering |
 | `dsu-chat.css` | All styles, including the branding colors |
 | `demo.html` | A test page that loads the widget like dsu.edu would |
 | `dsu-chat-mock.js` | Saved `/chat` replies for mock mode (demo page only, never embedded) |
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
-| `tests/mock.test.js` | Checks that mock mode never makes a network request |
+| `tests/mock.test.js` | Checks that mock mode, thumbs up/down included, never makes a network request |
 
 ## Embedding it on a site (Drupal)
 
@@ -22,7 +22,7 @@ Host `dsu-chat.js` and `dsu-chat.css` in the same folder, then add one tag to th
 for example in a custom block or the theme's footer):
 
 ```html
-<script src="https://YOUR-HOST/widget/dsu-chat.js?v=0.1.0"
+<script src="https://YOUR-HOST/widget/dsu-chat.js?v=0.1.1"
         data-api-url="https://YOUR-API-HOST" defer></script>
 ```
 
@@ -65,6 +65,11 @@ Only these variables cross that boundary.
 - **Answers:** shown with basic Markdown: **bold**, *italic*, bullet and numbered lists, and links.
 - **Sources:** one card per cited page. The answer text doesn't repeat them (the system prompt no
   longer asks for a "Source:" line).
+- **Feedback:** each answer has thumbs up and thumbs down buttons ("Helpful" / "Not helpful" for
+  screen readers) that send the answer's `request_id` to the backend's `POST /feedback`. The
+  chosen one gets `aria-pressed="true"` and a short "Thanks!" appears; picking the other one
+  changes the rating. The styling is a placeholder; restyle with the classes `.feedback`,
+  `.feedback-button`, `.feedback-up`, `.feedback-down`, and `.feedback-status`.
 - **Notice:** the panel says it's an AI assistant that answers from DSU's website and can make
   mistakes, not to share personal information, and to contact the office for official decisions.
 - **Errors:** a too-long or empty question shows a message under the box without calling the
@@ -139,7 +144,8 @@ word in quotes does the same:
 
 The replies are real `/chat` answers saved in [dsu-chat-mock.js](dsu-chat-mock.js). That file
 replaces `fetch` on the demo page, so nothing is sent anywhere. Only `demo.html` loads it, and it
-does nothing without `?mock=1`. `dsu-chat.js` doesn't know about it, so the embed code can't turn
+does nothing without `?mock=1`. Thumbs up/down work on every mock answer and always say "Thanks!";
+the rating is kept nowhere. `dsu-chat.js` doesn't know about it, so the embed code can't turn
 mock mode on. Don't host `dsu-chat-mock.js` with the widget.
 
 ## Tests
@@ -153,5 +159,5 @@ request.
 
 ## Not built yet
 
-- Thumbs up/down feedback: needs a `/feedback` endpoint on the backend first.
+- A comment box with thumbs down (`/feedback` already accepts an optional `comment`).
 - Conversation memory (follow-up questions).

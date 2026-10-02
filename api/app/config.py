@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # the local demo page (widget/README.md); production lists DSU's site. "*" is refused.
     allowed_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
     log_level: str = "INFO"
+    # Every /chat exchange and its feedback, PII redacted (api/app/exchange_log.py).
+    exchange_log: str = "sqlite"  # sqlite (a local file) | none (keep nothing)
+    exchange_log_path: str = "data/exchanges/exchanges.sqlite"  # data/ is gitignored
+    exchange_retention_days: int = 90  # the purge command deletes exchanges older than this
+    feedback_max_comment_chars: int = 500
 
     @field_validator("allowed_origins")
     @classmethod

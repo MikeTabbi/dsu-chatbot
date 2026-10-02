@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.1.1"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
 
@@ -33,7 +33,27 @@
       "I couldn't reach the DSU assistant. Check your internet connection and try again.",
     generic: "Something went wrong. Please try again in a few minutes, or visit desu.edu.",
     retry: "Your question is back in the box, so you can send it again.",
+    feedbackThanks: "Thanks!",
+    feedbackFailed: "Sorry, that didn't send. Please try again.",
   };
+
+  const FEEDBACK_BUTTONS = [
+    { rating: "up", label: "Helpful", icon: "\u{1F44D}" },
+    { rating: "down", label: "Not helpful", icon: "\u{1F44E}" },
+  ];
+
+  /** The fetch() arguments that send a thumbs up or down for one answer to POST /feedback. */
+  function feedbackRequest(apiUrl, requestId, rating) {
+    return [
+      `${apiUrl}/feedback`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, rating }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    ];
+  }
 
   // ---------------------------------------------------------------------------------------------
   // Markdown: text -> a list of plain objects (parseMarkdown) -> DOM nodes (renderMarkdown).
@@ -444,7 +464,55 @@
           (s) => s && typeof s.url === "string" && isSafeUrl(s.url)
         );
         if (sources.length) el.appendChild(sourceCards(sources));
+        if (typeof data.request_id === "string" && data.request_id) {
+          el.appendChild(feedbackButtons(data.request_id));
+        }
       });
+    }
+
+    /** Thumbs up/down for one answer. Rating again replaces the earlier rating. */
+    function feedbackButtons(requestId) {
+      const group = document.createElement("div");
+      group.className = "feedback";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", "Was this answer helpful?");
+      const status = document.createElement("span");
+      status.className = "feedback-status";
+      status.setAttribute("role", "status");
+
+      const buttons = FEEDBACK_BUTTONS.map(({ rating, label, icon }) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `feedback-button feedback-${rating}`;
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", "false");
+        const glyph = document.createElement("span");
+        glyph.setAttribute("aria-hidden", "true");
+        glyph.textContent = icon;
+        button.appendChild(glyph);
+        button.addEventListener("click", () => rate(rating, button));
+        return button;
+      });
+
+      let sending = false; // not `disabled`: that would drop keyboard focus from the button
+      async function rate(rating, chosen) {
+        if (sending) return;
+        sending = true;
+        status.textContent = "";
+        try {
+          const response = await fetch(...feedbackRequest(options.apiUrl, requestId, rating));
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          buttons.forEach((b) => b.setAttribute("aria-pressed", String(b === chosen)));
+          status.textContent = MESSAGES.feedbackThanks;
+        } catch {
+          status.textContent = MESSAGES.feedbackFailed;
+        } finally {
+          sending = false;
+        }
+      }
+
+      group.append(...buttons, status);
+      return group;
     }
 
     function sourceCards(sources) {
@@ -515,7 +583,7 @@
   }
 
   if (typeof module === "object" && module.exports) {
-    module.exports = { isSafeUrl, parseMarkdown, renderMarkdown, formatDate }; // for the tests
+    module.exports = { isSafeUrl, parseMarkdown, renderMarkdown, formatDate, feedbackRequest }; // for the tests
   }
   if (typeof document !== "undefined") boot();
 })();

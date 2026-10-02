@@ -103,6 +103,28 @@ test("each state gives the reply the widget expects", async () => {
   await assert.rejects(ask(window, "(network)"), TypeError);
 });
 
+test("thumbs up/down in mock mode succeed with no network request", async () => {
+  const { feedbackRequest } = require("../dsu-chat.js");
+  const { window, network } = loadMock("?mock=1");
+  for (const rating of ["up", "down"]) {
+    const response = await window.fetch(
+      ...feedbackRequest("http://localhost:8000", "mock-short", rating)
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { request_id: "mock-short", rating });
+  }
+  await window.fetch("http://localhost:8000/feedback", { method: "POST", body: "not json" });
+  assert.deepEqual(network, []);
+});
+
+test("every mock answer has a request ID, so it gets thumbs buttons", async () => {
+  const { window } = loadMock("?mock=1");
+  for (const question of ["short", "long answer", "personal", "off topic", "slow"]) {
+    const body = await (await ask(window, question)).json();
+    assert.equal(typeof body.request_id, "string", question);
+  }
+});
+
 test("without ?mock=1 the mock file changes nothing", () => {
   for (const search of ["", "?mock=0", "?mock=true", "?q=mock=1"]) {
     const { window, realFetch } = loadMock(search);

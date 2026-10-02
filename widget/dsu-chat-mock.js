@@ -6,7 +6,8 @@
  * nothing about it. It does nothing unless the page URL has ?mock=1. When it runs, it replaces
  * window.fetch so every request gets a saved reply and nothing goes over the network.
  *
- * The answers are real /chat output from an eval run (eval/results, Claude Sonnet).
+ * The answers are real /chat output from an eval run (eval/results, Claude Sonnet). Thumbs
+ * up/down (POST /feedback) always succeed here, and the rating is kept nowhere.
  */
 (function () {
   "use strict";
@@ -146,8 +147,22 @@
     }
   }
 
+  /** The saved reply to POST /feedback: the rating is accepted, and kept nowhere. */
+  function feedbackReply(init) {
+    let body = {};
+    try {
+      body = JSON.parse(init && init.body) || {};
+    } catch {}
+    const reply = { request_id: body.request_id, rating: body.rating };
+    const headers = { "Content-Type": "application/json" };
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(new Response(JSON.stringify(reply), { status: 200, headers })), 300);
+    });
+  }
+
   function mockFetch(input, init) {
     const url = String(input && input.url ? input.url : input);
+    if (/\/feedback$/.test(url)) return feedbackReply(init);
     let state = pickState(questionFrom(init));
     if (!/\/chat$/.test(url)) state = STATES.find((s) => s.name === "network"); // never go out
     const reply =
