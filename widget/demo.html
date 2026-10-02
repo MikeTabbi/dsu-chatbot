@@ -25,6 +25,20 @@
       button {
         background: yellow; /* page styles like this must not reach the widget */
       }
+      .mock-panel {
+        max-width: 520px; /* stays clear of the open widget on a laptop screen */
+        margin-top: 24px;
+        padding: 16px;
+        border: 2px dashed #888;
+      }
+      .mock-panel h2 {
+        margin-top: 0;
+      }
+      .mock-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
 
       /* Branding example: uncomment to try other colors.
       :root {
@@ -45,10 +59,59 @@
       </p>
       <p>
         The backend must be running on http://localhost:8000 and allow this page's origin
-        (http://localhost:8080). See widget/README.md.
+        (http://localhost:8080). See widget/README.md. To try the widget without a backend, open
+        <a href="?mock=1">demo.html?mock=1</a>.
       </p>
+
+      <section class="mock-panel" id="mock-panel" hidden>
+        <h2>Mock mode</h2>
+        <p>
+          Replies are saved examples and nothing is sent anywhere. Each button asks a question
+          that shows one state. Typing a question with the word in quotes does the same.
+        </p>
+        <div class="mock-buttons">
+          <button type="button" data-question="Where is DSU? (short)">Short answer ("short")</button>
+          <button type="button" data-question="How can I get a meal plan? (long answer)">
+            Long answer ("long answer")
+          </button>
+          <button type="button" data-question="What's my GPA? (personal)">
+            Personal data ("personal")
+          </button>
+          <button type="button" data-question="Write me a poem (off topic)">
+            Off-topic ("off topic")
+          </button>
+          <button type="button" data-question="Where is DSU? (slow)">Loading, 5 seconds ("slow")</button>
+          <button type="button" data-question="Where is DSU? (503)">Unavailable ("503")</button>
+          <button type="button" data-question="Where is DSU? (network)">Network error ("network")</button>
+          <button type="button" data-question="Where is DSU? (too long)">
+            Too long, from the API ("too long")
+          </button>
+          <button type="button" data-fill-too-long>Too long, under the box (1,001 characters)</button>
+        </div>
+      </section>
     </main>
 
+    <!-- Demo page only. Does nothing without ?mock=1. Never add this to the embed code. -->
+    <script src="dsu-chat-mock.js"></script>
     <script src="dsu-chat.js" data-api-url="http://localhost:8000" defer></script>
+    <script>
+      // Mock panel buttons: open the widget and ask the question. Demo page only.
+      if (window.DSU_CHAT_MOCK) {
+        document.getElementById("mock-panel").hidden = false;
+        document.querySelector(".mock-buttons").addEventListener("click", (event) => {
+          const button = event.target.closest("button");
+          const root = document.getElementById("dsu-chat-widget")?.shadowRoot;
+          const input = root?.querySelector("textarea");
+          if (!button || !input) return;
+          const launcher = root.querySelector("[aria-controls]");
+          if (launcher?.getAttribute("aria-expanded") === "false") launcher.click();
+          input.value = button.hasAttribute("data-fill-too-long")
+            ? "a".repeat(1001)
+            : button.dataset.question;
+          input.dispatchEvent(new Event("input"));
+          input.form.requestSubmit();
+        });
+      }
+    </script>
   </body>
 </html>

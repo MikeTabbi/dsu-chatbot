@@ -12,7 +12,9 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 | `dsu-chat.js` | Everything: the button, the panel, the call to `/chat`, Markdown rendering |
 | `dsu-chat.css` | All styles, including the branding colors |
 | `demo.html` | A test page that loads the widget like dsu.edu would |
+| `dsu-chat-mock.js` | Saved `/chat` replies for mock mode (demo page only, never embedded) |
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
+| `tests/mock.test.js` | Checks that mock mode never makes a network request |
 
 ## Embedding it on a site (Drupal)
 
@@ -110,6 +112,35 @@ shows a CORS error when it doesn't.
 
 To see the phone layout, open your browser's developer tools and turn on the device toolbar (a
 screen narrower than 480px).
+
+## Mock mode (no backend)
+
+For styling work you don't need the backend or an API key:
+
+```bash
+python -m http.server 8080 --directory widget
+```
+
+Open http://localhost:8080/demo.html?mock=1. A **Mock mode** box on the page has one button per
+state. Each button opens the widget and asks a question. Typing a question that contains the
+word in quotes does the same:
+
+| State | Button or word |
+|---|---|
+| Short answer, one source card | "short" (also any question without the other words) |
+| Long answer with lists and links, two source cards | "long answer" |
+| Personal-data redirect, no sources | "personal" |
+| Off-topic decline | "off topic" |
+| Loading dots for 5 seconds, then the short answer | "slow" |
+| Unavailable (503) | "503" |
+| Network error | "network" |
+| Question too long, as the API reports it | "too long" |
+| Question too long, the message under the box | the last button (fills in 1,001 characters) |
+
+The replies are real `/chat` answers saved in [dsu-chat-mock.js](dsu-chat-mock.js). That file
+replaces `fetch` on the demo page, so nothing is sent anywhere. Only `demo.html` loads it, and it
+does nothing without `?mock=1`. `dsu-chat.js` doesn't know about it, so the embed code can't turn
+mock mode on. Don't host `dsu-chat-mock.js` with the widget.
 
 ## Tests
 
