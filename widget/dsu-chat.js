@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.1"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.1.2"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
 
@@ -32,6 +32,7 @@
     network:
       "I couldn't reach the DSU assistant. Check your internet connection and try again.",
     generic: "Something went wrong. Please try again in a few minutes, or visit desu.edu.",
+    rateLimited: "You're sending questions faster than I can answer. Please wait a minute and try again.",
     retry: "Your question is back in the box, so you can send it again.",
     feedbackThanks: "Thanks!",
     feedbackFailed: "Sorry, that didn't send. Please try again.",
@@ -53,6 +54,15 @@
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     ];
+  }
+
+  /** What to say when /chat doesn't answer. The API's own words when it gives them (question too
+   * long, too many questions, busy), shown as plain text like every other message. */
+  function errorMessage(status, data) {
+    if ([422, 429, 503].includes(status) && typeof data?.detail === "string") return data.detail;
+    if (status === 429) return MESSAGES.rateLimited;
+    if (status === 503) return MESSAGES.unavailable;
+    return MESSAGES.generic;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -410,12 +420,8 @@
         const data = await response.json().catch(() => null);
         if (response.ok && data && typeof data.answer === "string") {
           addAnswer(data);
-        } else if (response.status === 422 && typeof data?.detail === "string") {
-          failed(data.detail, question); // the API's own message, e.g. question too long
-        } else if (response.status === 503) {
-          failed(MESSAGES.unavailable, question);
         } else {
-          failed(MESSAGES.generic, question);
+          failed(errorMessage(response.status, data), question);
         }
       } catch {
         failed(MESSAGES.network, question); // offline, CORS blocked, or timed out
@@ -583,7 +589,14 @@
   }
 
   if (typeof module === "object" && module.exports) {
-    module.exports = { isSafeUrl, parseMarkdown, renderMarkdown, formatDate, feedbackRequest }; // for the tests
+    module.exports = {
+      isSafeUrl,
+      parseMarkdown,
+      renderMarkdown,
+      formatDate,
+      feedbackRequest,
+      errorMessage,
+    }; // for the tests
   }
   if (typeof document !== "undefined") boot();
 })();

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -25,7 +25,9 @@ from api.app.exchange_log import (
     now,
 )
 from api.app.prompt import build_prompt, parse_citations, prompt_version
+from api.app.rate_limit import DAY, MINUTE, Limit, RateLimiter, client_ip, get_rate_limiter
 from api.app.redact import redact
+from api.app.request_guard import RequestGuard
 from api.app.retriever import Retriever, get_retriever
 from ingestion.chunk import Chunk
 
@@ -43,15 +45,28 @@ UNAVAILABLE_ANSWER = (
 )
 UNKNOWN_REQUEST = "No answer with that request ID was found."
 FEEDBACK_UNAVAILABLE = "Sorry, your feedback couldn't be saved. Please try again later."
+TOO_FAST = "You're sending questions faster than I can answer. Please wait a minute and try again."
+DAILY_LIMIT = (
+    "You've reached today's limit for questions. Please try again tomorrow, or visit desu.edu."
+)
+FEEDBACK_TOO_FAST = "That's a lot of feedback at once. Please wait a minute and try again."
+BUSY_ANSWER = "The DSU assistant is busy right now. Please try again later, or visit desu.edu."
 
 app = FastAPI(title="DSU Chatbot API", version="0.1.0")
 
+# Added before CORS so CORS wraps it: the widget can read a 413 or 415 like any other error.
+app.add_middleware(
+    RequestGuard,
+    paths=["/chat", "/feedback"],
+    max_bytes=lambda: _current_settings().max_request_bytes,
+)
 # Lets the widget on the listed sites call the API. No cookies, so no credentials.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
+    expose_headers=["Retry-After"],
 )
 
 
@@ -87,6 +102,11 @@ def get_settings() -> Settings:
     return settings
 
 
+def _current_settings() -> Settings:
+    """get_settings, or the test's override of it, for code outside FastAPI's dependencies."""
+    return app.dependency_overrides.get(get_settings, get_settings)()
+
+
 @functools.cache
 def get_chat_retriever() -> Retriever:
     """Built once (the local retriever indexes every chunk); tests override this dependency."""
@@ -110,19 +130,86 @@ def get_chat_exchange_log() -> ExchangeLog:
         return NullExchangeLog()
 
 
+@functools.cache
+def get_chat_rate_limiter() -> RateLimiter:
+    """Built once, so the counts last as long as the process; tests override this dependency."""
+    return get_rate_limiter(settings)
+
+
+class RateLimitedError(Exception):
+    def __init__(self, detail: str, retry_after: int):
+        self.detail = detail
+        self.retry_after = retry_after
+        self.request_id = uuid.uuid4().hex
+
+
+@app.exception_handler(RateLimitedError)
+def _rate_limited(request: Request, e: RateLimitedError) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": e.detail, "request_id": e.request_id},
+        headers={"Retry-After": str(e.retry_after)},
+    )
+
+
+def limit_chat(
+    request: Request,
+    config: Annotated[Settings, Depends(get_settings)],
+    limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
+) -> None:
+    """Per-client limits on /chat. Runs before the question is read, so bad requests count too."""
+    limits = [
+        Limit("chat_per_minute", config.rate_limit_chat_per_minute, MINUTE),
+        Limit("chat_per_day", config.rate_limit_chat_per_day, DAY),
+    ]
+    _limit(request, config, limiter, "chat", limits)
+
+
+def limit_feedback(
+    request: Request,
+    config: Annotated[Settings, Depends(get_settings)],
+    limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
+) -> None:
+    limits = [Limit("feedback_per_minute", config.rate_limit_feedback_per_minute, MINUTE)]
+    _limit(request, config, limiter, "feedback", limits)
+
+
+def _limit(
+    request: Request, config: Settings, limiter: RateLimiter, endpoint: str, limits: list[Limit]
+) -> None:
+    blocked = limiter.hit(f"{endpoint}:{client_ip(request, config.trust_proxy)}", limits)
+    if blocked is None:
+        return
+    if endpoint == "feedback":
+        detail = FEEDBACK_TOO_FAST
+    else:
+        detail = DAILY_LIMIT if blocked.limit.seconds == DAY else TOO_FAST
+    error = RateLimitedError(detail, blocked.retry_after)
+    # Request ID and outcome only: never the question, and not the IP address.
+    log.info(
+        "%s request_id=%s outcome=rate_limited limit=%s retry_after=%d",
+        endpoint,
+        error.request_id,
+        blocked.limit.name,
+        blocked.retry_after,
+    )
+    raise error
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Simple check that the server is up."""
     return {"status": "ok"}
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit_chat)])
 def chat(
     request: ChatRequest,
     retriever: Annotated[Retriever, Depends(get_chat_retriever)],
     client: Annotated[ClaudeClient, Depends(get_chat_client)],
     config: Annotated[Settings, Depends(get_settings)],
     exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
+    limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
 ):
     """Answer one question from retrieved DSU content, with the sources the answer cites."""
     request_id = uuid.uuid4().hex
@@ -145,6 +232,17 @@ def chat(
         record("no_sources", NO_CONTENT_ANSWER)
         return ChatResponse(answer=NO_CONTENT_ANSWER, sources=[], request_id=request_id)
 
+    # The daily budget counts Claude calls from every client, so credits are safe even when the
+    # traffic comes from many addresses. Questions with no chunks never call Claude or count.
+    budget = Limit("claude_daily_calls", config.claude_daily_call_budget, DAY)
+    if blocked := limiter.hit("global:claude", [budget]):
+        _log_request(request_id, start, chunks, "busy reason=daily_budget")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": BUSY_ANSWER, "request_id": request_id},
+            headers={"Retry-After": str(blocked.retry_after)},
+        )
+
     prompt = build_prompt(question, chunks)
     try:
         reply = client.complete(prompt.system, prompt.messages)
@@ -162,7 +260,7 @@ def chat(
     return ChatResponse(answer=answer.text, sources=sources, request_id=request_id)
 
 
-@app.post("/feedback", response_model=FeedbackResponse)
+@app.post("/feedback", response_model=FeedbackResponse, dependencies=[Depends(limit_feedback)])
 def feedback(
     request: FeedbackRequest,
     config: Annotated[Settings, Depends(get_settings)],

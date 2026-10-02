@@ -14,6 +14,8 @@
 
   const UNAVAILABLE =
     "Sorry, I can't answer right now. Please try again in a few minutes, or visit desu.edu.";
+  const TOO_FAST =
+    "You're sending questions faster than I can answer. Please wait a minute and try again.";
 
   // Each state: the words that pick it (checked in this order), how long the reply takes, and
   // the reply. `reply: null` means a network error. A question with none of the words gets "short".
@@ -88,6 +90,13 @@
         sources: [],
         request_id: "mock-off-topic",
       },
+    },
+    {
+      name: "rate limited",
+      words: ["rate limit", "429"],
+      status: 429, // what the API says when one client asks too often
+      headers: { "Retry-After": "45" },
+      reply: { detail: TOO_FAST, request_id: "mock-429" },
     },
     {
       name: "503",
@@ -174,7 +183,7 @@
         if (reply === null) {
           reject(new TypeError("Failed to fetch (mock network error)"));
         } else {
-          const headers = { "Content-Type": "application/json" };
+          const headers = { "Content-Type": "application/json", ...state.headers };
           resolve(new Response(JSON.stringify(reply), { status, headers }));
         }
       }, state.delayMs ?? DEFAULT_DELAY_MS);

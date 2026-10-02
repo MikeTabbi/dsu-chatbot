@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     exchange_log_path: str = "data/exchanges/exchanges.sqlite"  # data/ is gitignored
     exchange_retention_days: int = 90  # the purge command deletes exchanges older than this
     feedback_max_comment_chars: int = 500
+    # Abuse protection (api/app/rate_limit.py). Per-client limits count by IP; 0 turns one off.
+    rate_limiter: str = "memory"  # memory (counters in this process) | none (no limits)
+    rate_limit_chat_per_minute: int = 10
+    rate_limit_chat_per_day: int = 100
+    rate_limit_feedback_per_minute: int = 30
+    # Claude calls per UTC day across all clients; past it /chat says it's busy. 0: no budget.
+    claude_daily_call_budget: int = 2000
+    # Read the client IP from X-Forwarded-For. Only turn on behind a proxy that sets it (Azure
+    # App Service); otherwise anyone could send the header and pick their own IP.
+    trust_proxy: bool = False
+    max_request_bytes: int = 16384  # largest /chat or /feedback body; bigger gets a 413
 
     @field_validator("allowed_origins")
     @classmethod

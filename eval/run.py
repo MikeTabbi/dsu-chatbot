@@ -19,9 +19,11 @@ from api.app.main import (
     app,
     get_chat_client,
     get_chat_exchange_log,
+    get_chat_rate_limiter,
     get_chat_retriever,
     get_settings,
 )
+from api.app.rate_limit import NoRateLimiter
 from api.app.retriever import Retriever
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -258,6 +260,9 @@ def run_full(
     app.dependency_overrides[get_chat_client] = lambda: client
     # Eval questions aren't students', so they stay out of the exchange log and its review.
     app.dependency_overrides[get_chat_exchange_log] = NullExchangeLog
+    # Every case comes from this one process, so per-client limits and the daily budget would stop
+    # a full run partway through.
+    app.dependency_overrides[get_chat_rate_limiter] = NoRateLimiter
     if retriever is not None:
         app.dependency_overrides[get_chat_retriever] = lambda: retriever
     if k is not None:
