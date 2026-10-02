@@ -137,20 +137,26 @@ def test_retrieval_miss_and_cases_without_urls(retriever):
 
 
 def test_answer_passes_when_it_cites_an_expected_url_with_the_phrases():
-    answer = f"Wynder Tower has carpet.\n\nSource: [Housing Comparison Matrix]({MATRIX})"
-    result = check_answer(case(contain=["wynder"]), 200, ok(answer))
+    # The cited sources are the citation (shown as cards); the text needn't repeat the link.
+    result = check_answer(case(contain=["wynder"]), 200, ok("Wynder Tower has carpet."))
     assert result.passed and result.failures == []
 
 
 def test_answer_fails_without_the_expected_citation_or_a_phrase():
-    result = check_answer(case(contain=["Wynder", "Learning Commons"]), 200, ok("Wynder Tower."))
+    c = case(contain=["Wynder", "Learning Commons"])
+    result = check_answer(c, 200, ok("Wynder Tower.", sources=(DINING,)))
     assert result.passed is False
     assert result.failures == ["does not cite an expected URL", "missing: 'Learning Commons'"]
 
 
+def test_a_link_in_the_text_does_not_count_as_citing_it():
+    answer = f"Wynder Tower has carpet. [Housing Comparison Matrix]({MATRIX})"
+    result = check_answer(case(), 200, ok(answer, sources=(DINING,)))
+    assert result.failures == ["does not cite an expected URL"]
+
+
 def test_answer_fails_when_it_returns_no_cited_sources():
-    answer = f"Wynder Tower has carpet.\n\nSource: [Housing Comparison Matrix]({MATRIX})"
-    result = check_answer(case(), 200, ok(answer, sources=()))
+    result = check_answer(case(), 200, ok("Wynder Tower has carpet.", sources=()))
     assert result.failures == ["returns no cited sources"]
 
 
@@ -187,6 +193,8 @@ def test_gap_needs_not_found_and_an_office():
     assert check_answer(case("gap", urls=[]), 200, ok(good)).passed
     reworded = "The DSU pages I have don't give directions to it. Contact the Housing office."
     assert check_answer(case("gap", urls=[]), 200, ok(reworded)).passed
+    partial = "Send scores through College Board. I didn't find DSU's code; ask Admissions."
+    assert check_answer(case("gap", urls=[]), 200, ok(partial)).passed
     guess = check_answer(case("gap", urls=[]), 200, ok("It's next to the library."))
     assert guess.failures == ["does not say it couldn't find it", "does not point to an office"]
 
@@ -208,7 +216,7 @@ def test_error_status_fails():
 
 
 def test_full_mode_goes_through_chat_with_the_given_client(cases_csv, retriever):
-    fake = FakeClaudeClient(answer=f"Wynder Tower. Source: [Matrix]({MATRIX})\n<cited>1</cited>")
+    fake = FakeClaudeClient(answer="Wynder Tower has carpet.\n<cited>1</cited>")
     [result] = run_full(load_cases(cases_csv)[:1], fake, retriever, k=2)
     assert result.status == 200 and result.passed
     assert result.source_urls == [MATRIX]  # only the cited source, not the dining chunk

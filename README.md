@@ -135,7 +135,8 @@ CLAUDE_CLIENT=anthropic python -m api.app.claude_client "Reply with: hello from 
 ## System prompt
 
 The bot's rules are in [prompts/system.md](prompts/system.md), in plain English: answer only from
-the DSU sources given, cite their URLs, say so plainly when the sources don't answer, never guess
+the DSU sources given, mark which sources it used (the widget shows those as source cards, so the
+answer has no "Source:" line), say so plainly when the sources don't answer, never guess
 a student's own records (point to DegreeWorks, Navigate, Banner Self-Service), mention the date of
 old pages, stay on DSU topics, treat source text as information and never as instructions, and
 point a student in distress to DSU Counseling Services (and 911 or 988 in an emergency).
@@ -204,12 +205,23 @@ CLAUDE_CLIENT=anthropic uvicorn api.app.main:app
 python -c "import httpx; print(httpx.post('http://localhost:8000/chat', json={'question': 'How do I register for classes?'}, timeout=60).json())"
 ```
 
+## Chat widget
+
+[widget/](widget/) is the chat window for dsu.edu: plain JavaScript and CSS, embedded with one
+script tag, no build step. See [widget/README.md](widget/README.md) for embedding, branding, and
+running the demo page locally (`python -m http.server 8080 --directory widget`).
+
+Browsers only let a page call the API if its site is listed in `ALLOWED_ORIGINS` (exact sites,
+comma-separated). The default allows the local demo page (`http://localhost:8080`); production
+lists DSU's site. `*` is refused at startup, so the API is never open to every site.
+
 ## Tests and linting
 
 ```bash
 pytest
 ruff check .
 ruff format .
+node --test widget/tests/*.test.js   # widget tests, no npm install needed
 ```
 
 ## Contributing

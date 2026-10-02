@@ -1,6 +1,6 @@
 """App settings, loaded from environment variables (or a local .env file)."""
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,8 +22,21 @@ class Settings(BaseSettings):
     synonyms_file: str = "api/app/synonyms.yaml"  # word groups for the local retriever
     chat_top_k: int = 5  # chunks retrieved per question and passed to Claude
     chat_max_question_chars: int = 1000
-    allowed_origins: str = "http://localhost:8000"
+    # Sites allowed to call the API from a browser (the widget), comma-separated. The default is
+    # the local demo page (widget/README.md); production lists DSU's site. "*" is refused.
+    allowed_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
     log_level: str = "INFO"
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _no_wildcard_origin(cls, value: str) -> str:
+        if "*" in value:
+            raise ValueError("ALLOWED_ORIGINS must list exact sites; '*' (any site) isn't allowed")
+        return value
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip().rstrip("/") for o in self.allowed_origins.split(",") if o.strip()]
 
 
 settings = Settings()
