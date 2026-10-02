@@ -6,6 +6,13 @@
 #   change_frequency: slow | medium | fast  (how often the page content changes)
 #   notes:            why this page is here / what questions it answers
 
+# How often `python -m ingestion.pipeline` re-checks a page, by change_frequency, in hours.
+# 0 means every run. --force checks every page regardless.
+check_interval_hours:
+  fast: 0
+  medium: 24
+  slow: 168
+
 sources:
   # Housing
   - url: https://www.desu.edu/student-life/housing-dining

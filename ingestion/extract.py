@@ -1,6 +1,7 @@
 """Extract each crawled page's main content and metadata from the raw HTML in data/raw/."""
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -56,6 +57,9 @@ class Extraction:
     breadcrumb: list[dict[str, str | None]]
     container: str  # selector that matched the content region, or "fallback"
     text: str  # Markdown
+    text_hash: (
+        str  # SHA-256 of text; the pipeline compares it to skip pages whose text is unchanged
+    )
     word_count: int
     low_text: bool
 
@@ -93,9 +97,14 @@ def extract(html: str | bytes, url: str, encoding: str | None = None) -> Extract
         breadcrumb=breadcrumb,
         container=container,
         text=text,
+        text_hash=text_hash(text),
         word_count=words,
         low_text=words < MIN_WORDS,
     )
+
+
+def text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def extract_page(meta_path: Path, output_dir: Path) -> ExtractedPage:

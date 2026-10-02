@@ -2,6 +2,7 @@
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -28,13 +29,7 @@ class Source:
 def load_sources(path: Path | str = DEFAULT_PATH) -> list[Source]:
     """Read the registry and return its sources, raising SourceRegistryError on any problem."""
     path = Path(path)
-    try:
-        data = yaml.safe_load(path.read_text())
-    except OSError as e:
-        raise SourceRegistryError(f"cannot read {path}: {e}") from e
-    except yaml.YAMLError as e:
-        raise SourceRegistryError(f"{path} is not valid YAML: {e}") from e
-
+    data = _read(path)
     if not isinstance(data, dict) or not isinstance(data.get("sources"), list):
         raise SourceRegistryError(f"{path} must have a top-level 'sources' list")
 
@@ -44,6 +39,33 @@ def load_sources(path: Path | str = DEFAULT_PATH) -> list[Source]:
     if duplicates:
         raise SourceRegistryError(f"duplicate urls: {', '.join(duplicates)}")
     return sources
+
+
+def load_check_intervals(path: Path | str = DEFAULT_PATH) -> dict[str, timedelta]:
+    """How long after its last check each change_frequency's pages are due to be checked again."""
+    path = Path(path)
+    data = _read(path)
+    hours = data.get("check_interval_hours") if isinstance(data, dict) else None
+    if not isinstance(hours, dict) or set(hours) != set(CHANGE_FREQUENCIES):
+        raise SourceRegistryError(
+            f"{path} must have a 'check_interval_hours' mapping with exactly: "
+            f"{', '.join(CHANGE_FREQUENCIES)}"
+        )
+    for frequency, value in hours.items():
+        if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+            raise SourceRegistryError(
+                f"check_interval_hours.{frequency} must be a number of hours >= 0: {value!r}"
+            )
+    return {frequency: timedelta(hours=hours[frequency]) for frequency in CHANGE_FREQUENCIES}
+
+
+def _read(path: Path) -> object:
+    try:
+        return yaml.safe_load(path.read_text())
+    except OSError as e:
+        raise SourceRegistryError(f"cannot read {path}: {e}") from e
+    except yaml.YAMLError as e:
+        raise SourceRegistryError(f"{path} is not valid YAML: {e}") from e
 
 
 def _parse_entry(index: int, entry: object) -> Source:

@@ -243,6 +243,69 @@ def test_missing_robots_txt_allows_everything(tmp_path):
     assert result.ok
 
 
+def cached(etag='"1-1"', last_modified="Fri, 02 Oct 2026 17:57:57 GMT"):
+    """A page served with validators, answering 304 when the request echoes both back."""
+
+    def respond(request):
+        if request.headers.get("if-none-match") == etag and (
+            request.headers.get("if-modified-since") == last_modified
+        ):
+            return httpx.Response(304, headers={"etag": etag})
+        response = html()
+        response.headers.update({"etag": etag, "last-modified": last_modified})
+        return response
+
+    return respond
+
+
+def test_saves_validators_and_sends_them_on_the_next_crawl(tmp_path):
+    site = FakeSite({"/housing": cached()})
+    crawler, _ = make_crawler(tmp_path, site)
+    [first] = crawler.crawl([source("/housing")])
+    crawler, _ = make_crawler(tmp_path, site)  # a later run, reading state from disk
+
+    [second] = crawler.crawl([source("/housing")])
+
+    assert (first.status, first.etag) == (200, '"1-1"')
+    assert first.last_modified == "Fri, 02 Oct 2026 17:57:57 GMT"
+    assert "if-none-match" not in site.requests[1].headers
+    assert site.requests[-1].headers["if-none-match"] == '"1-1"'
+    assert second.ok and second.not_modified
+    assert second.html_file == first.html_file
+    assert (tmp_path / second.html_file).read_bytes() == SAMPLE_PAGE
+    meta = json.loads((tmp_path / second.html_file).with_suffix(".json").read_text())
+    assert meta["status"] == 304
+    assert meta["etag"] == '"1-1"'
+    assert meta["last_modified"] == "Fri, 02 Oct 2026 17:57:57 GMT"
+    assert meta["fetched_at"] == first.fetched_at
+
+
+def test_no_conditional_request_when_the_saved_body_is_missing(tmp_path):
+    site = FakeSite({"/housing": cached()})
+    crawler, _ = make_crawler(tmp_path, site)
+    [first] = crawler.crawl([source("/housing")])
+    (tmp_path / first.html_file).unlink()
+
+    [second] = crawler.crawl([source("/housing")])
+
+    assert "if-none-match" not in site.requests[-1].headers
+    assert second.status == 200
+    assert (tmp_path / second.html_file).exists()
+
+
+def test_validators_are_only_sent_to_the_url_they_came_from(tmp_path):
+    site = FakeSite({"/old": httpx.Response(301, headers={"location": "/new"}), "/new": cached()})
+    crawler, _ = make_crawler(tmp_path, site)
+    crawler.crawl([source("/old")])
+
+    [result] = crawler.crawl([source("/old")])
+
+    old, new = site.requests[-2:]
+    assert "if-none-match" not in old.headers
+    assert new.headers["if-none-match"] == '"1-1"'
+    assert result.not_modified
+
+
 def test_file_stem_is_readable_and_unique():
     a = _file_stem(SITE + "/student-life/housing-dining")
     b = _file_stem(SITE + "/student-life/housing-dining?page=2")

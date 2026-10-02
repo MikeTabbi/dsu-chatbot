@@ -43,7 +43,8 @@ list means nothing relevant was found. The `RETRIEVER` setting picks the impleme
 (the default) or `azure` (Azure AI Search, #22, not built yet).
 
 ```bash
-python -m ingestion.chunk                                     # build data/chunks first
+python -m ingestion.pipeline                                  # crawl, extract, chunk: data/chunks
+python -m ingestion.chunk                                     # or just re-chunk data/extracted
 python -m api.app.retriever "Which halls have carpeted rooms?"   # prints score, title, heading path, URL
 python -m api.app.retriever -k 3 "How do I send my SAT scores?"
 ```
