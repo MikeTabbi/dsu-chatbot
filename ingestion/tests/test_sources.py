@@ -1,6 +1,13 @@
+from datetime import timedelta
+
 import pytest
 
-from ingestion.sources import CHANGE_FREQUENCIES, SourceRegistryError, load_sources
+from ingestion.sources import (
+    CHANGE_FREQUENCIES,
+    SourceRegistryError,
+    load_check_intervals,
+    load_sources,
+)
 
 VALID_ENTRY = """
   - url: https://www.desu.edu/admissions
@@ -95,3 +102,38 @@ def test_invalid_yaml_is_rejected(tmp_path):
 def test_missing_file_is_rejected(tmp_path):
     with pytest.raises(SourceRegistryError, match="cannot read"):
         load_sources(tmp_path / "nope.yaml")
+
+
+def test_real_check_intervals_load():
+    assert load_check_intervals() == {
+        "fast": timedelta(0),
+        "medium": timedelta(days=1),
+        "slow": timedelta(days=7),
+    }
+
+
+def write_intervals(tmp_path, intervals):
+    path = tmp_path / "sources.yaml"
+    path.write_text(intervals + "sources:\n" + VALID_ENTRY)
+    return path
+
+
+def test_check_intervals_accept_fractional_hours(tmp_path):
+    path = write_intervals(tmp_path, "check_interval_hours: {fast: 0.5, medium: 24, slow: 168}\n")
+    assert load_check_intervals(path)["fast"] == timedelta(minutes=30)
+
+
+@pytest.mark.parametrize(
+    "intervals",
+    [
+        "",  # missing
+        "check_interval_hours: {fast: 0, medium: 24}\n",  # slow missing
+        "check_interval_hours: {fast: 0, medium: 24, slow: 168, hourly: 1}\n",
+        "check_interval_hours: {fast: -1, medium: 24, slow: 168}\n",
+        "check_interval_hours: {fast: soon, medium: 24, slow: 168}\n",
+        "check_interval_hours: {fast: true, medium: 24, slow: 168}\n",
+    ],
+)
+def test_bad_check_intervals_are_rejected(tmp_path, intervals):
+    with pytest.raises(SourceRegistryError, match="check_interval_hours"):
+        load_check_intervals(write_intervals(tmp_path, intervals))
