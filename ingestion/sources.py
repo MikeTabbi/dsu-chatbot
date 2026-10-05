@@ -59,6 +59,18 @@ def load_check_intervals(path: Path | str = DEFAULT_PATH) -> dict[str, timedelta
     return {frequency: timedelta(hours=hours[frequency]) for frequency in CHANGE_FREQUENCIES}
 
 
+def load_delete_after(path: Path | str = DEFAULT_PATH) -> int:
+    """How many checks in a row a page must answer 404 or 410 before its files are deleted."""
+    path = Path(path)
+    data = _read(path)
+    value = data.get("delete_after_missing_checks") if isinstance(data, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SourceRegistryError(
+            f"{path} must set delete_after_missing_checks to a whole number >= 1: {value!r}"
+        )
+    return value
+
+
 def _read(path: Path) -> object:
     try:
         return yaml.safe_load(path.read_text())

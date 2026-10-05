@@ -109,7 +109,7 @@ python -m http.server 8080 --directory widget
 ```
 
 Open http://localhost:8080/demo.html and click **Ask DSU**. With the fake client, answers look
-like `[fake answer] ...`. With no `data/chunks` (see the main README), every question gets the
+like `[fake answer] ...`. With no `data/index/chunks.json` (see the main README), every question gets the
 "couldn't find anything" answer.
 
 If the widget says it couldn't reach the assistant, check that the backend is running and that

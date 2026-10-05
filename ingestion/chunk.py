@@ -14,6 +14,9 @@ DEFAULT_INPUT_DIR = Path("data/extracted")
 DEFAULT_OUTPUT_DIR = Path("data/chunks")
 MAX_WORDS = 300  # a section longer than this is split into pieces
 OVERLAP_WORDS = 50  # trailing text repeated at the start of the next piece of the same section
+# Bump when a code change would chunk the same extracted page differently (sizes, overlap, IDs,
+# Chunk fields). The pipeline then re-chunks every page, even ones not due a check.
+CHUNKER_VERSION = 1
 
 HEADING = re.compile(r"^(#{1,6}) (.+)$")
 LIST_ITEM = re.compile(r"^(- |\d+\. )")
