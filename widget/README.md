@@ -163,25 +163,38 @@ Answers come from an AI model reading web pages, so treat them as untrusted text
 
 ## Running it locally
 
-You need the backend and a second local web server for the demo page (port 8080, a different
-origin from the API, like dsu.edu will be).
+`demo.html` is the official demo page. It loads the widget the way desu.edu will, and its answers
+come from the backend: it searches DSU's website content (`data/chunks`) and asks Claude to answer
+from what it finds.
+
+1. In `.env` (copy `.env.example` if you don't have one), set `CLAUDE_CLIENT=anthropic` and
+   `ANTHROPIC_API_KEY`. Leave `CLAUDE_CLIENT=fake` to try it without a key; answers then start
+   with `[fake answer]`.
+2. Install once: `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`
+3. From the repo root, run:
+
+   ```bash
+   ./scripts/run-demo.sh
+   ```
+
+   It starts the backend on http://localhost:8000 and the demo page on http://localhost:8080,
+   opens http://localhost:8080/demo.html, and stops both with Ctrl+C.
+
+The demo page checks the backend when it loads. A green **Connected** box means answers are live; a
+red box means the backend isn't running, or `ALLOWED_ORIGINS` doesn't include
+`http://localhost:8080` (the browser console then shows a CORS error).
+
+To check your key and model without the widget: `.venv/bin/python -m api.app.claude_client "Hi"`.
+
+To run the two parts yourself instead of the script:
 
 ```bash
-# Terminal 1: the backend (from the repo root). The default ALLOWED_ORIGINS allows the demo page.
-uvicorn api.app.main:app --reload                          # fake answers, no API key
-CLAUDE_CLIENT=anthropic uvicorn api.app.main:app --reload  # real answers
-
-# Terminal 2: serve the widget folder
-python -m http.server 8080 --directory widget
+uvicorn api.app.main:app --reload                 # terminal 1, from the repo root
+python -m http.server 8080 --directory widget      # terminal 2
 ```
 
-Open http://localhost:8080/demo.html and click **Ask DSU**. With the fake client, answers look
-like `[fake answer] ...`. With no `data/chunks` (see the main README), every question gets the
-"couldn't find anything" answer.
-
-If the widget says it couldn't reach the assistant, check that the backend is running and that
-`ALLOWED_ORIGINS` (in your `.env`, if set) includes `http://localhost:8080`. The browser console
-shows a CORS error when it doesn't.
+With no `data/chunks` (see the main README), every question gets the "couldn't find anything"
+answer.
 
 To see the phone layout, open your browser's developer tools and turn on the device toolbar (a
 screen narrower than 480px).

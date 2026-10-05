@@ -23,7 +23,7 @@
 
   const MESSAGES = {
     welcome:
-      "Hi! Ask me a question about DSU, like housing, admissions, or registration. " +
+      "Hi! I'm Jada, how can I help you today? You can ask me a question about DSU, like housing, admissions, or registration. " +
       "I answer each question on its own and don't remember earlier ones, so include the " +
       "details every time.",
     loading: "Looking that up…",
@@ -312,7 +312,7 @@
             ${WINDOW_BUTTONS}
           </header>
           <p class="notice">
-            I'm an AI assistant that answers from DSU's website, and I can make mistakes. Don't
+            Hi, I'm Jada! I'm an AI assistant that answers from DSU's website, and I can make mistakes. Don't
             share personal information. For official decisions, contact the DSU office that
             handles your question.
           </p>
@@ -1050,7 +1050,7 @@
     const options = {
       apiUrl,
       cssUrl: cssUrl.href,
-      title: script.dataset.title || "Ask DSU", //make it a name to make it more personable? Jada, Nadia, Nia, 
+      title: script.dataset.title || "Jada", //make it a name to make it more personable? Jada, Nadia, Nia, 
       maxChars: Number(script.dataset.maxChars) || 1000, // keep in sync with CHAT_MAX_QUESTION_CHARS
     };
     if (document.body) mount(options);

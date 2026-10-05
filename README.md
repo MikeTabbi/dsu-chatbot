@@ -34,6 +34,10 @@ uvicorn api.app.main:app --reload
 
 Check it's running: http://localhost:8000/health
 
+To see the whole thing working (backend plus the chat widget on the demo page), run
+`./scripts/run-demo.sh` and open http://localhost:8080/demo.html. See
+[widget/README.md](widget/README.md#running-it-locally).
+
 ## Retrieval
 
 `/chat` depends only on the `Retriever` interface in [api/app/retriever.py](api/app/retriever.py):
