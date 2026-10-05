@@ -15,7 +15,8 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 |---|---|
 | `dsu-chat.js` | Everything: the button, the panel, the call to `/chat`, Markdown rendering |
 | `dsu-chat.css` | All styles, including the branding colors |
-| `dsu-avatar.svg` | The assistant's illustrated avatar (launcher, header, next to answers) |
+| `dsu-avatar.jpg` | The assistant's avatar (launcher, home screen, headers). 256×256, square; the widget crops it to a circle |
+| `dsu-avatar-face.jpg` | Close-up of her face for the small spots: next to answers, the Resume card, Past Conversations rows |
 | `dsu-campus.jpg` | Aerial campus photo behind the welcome text (see "Header photo") |
 | `fonts/` | Roboto font files you add (see "Font"). Optional: without them the widget uses Arial |
 | `demo.html` | A test page that loads the widget like dsu.edu would |
@@ -26,7 +27,7 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 
 ## Embedding it on a site (Drupal)
 
-Host `dsu-chat.js`, `dsu-chat.css`, `dsu-avatar.svg`, `dsu-campus.jpg`, and the `fonts/` folder
+Host `dsu-chat.js`, `dsu-chat.css`, `dsu-avatar.jpg`, `dsu-avatar-face.jpg`, `dsu-campus.jpg`, and the `fonts/` folder
 together, then add one tag to the page (in Drupal,
 for example in a custom block or the theme's footer):
 
@@ -111,11 +112,22 @@ rights with Marketing & Communications before going live.
   - The screen says conversations are saved on this device and visible to anyone using the
     browser, which matters on shared lab and library computers. **Delete all conversations**
     (with a confirm step) clears them.
+  - The list shows each conversation's last answer, "Ask DSU · 2 Hrs Ago", and a ">" arrow, with a
+    light gray line between rows. Screen readers also hear the first question.
   - Tapping a conversation reopens it, and new questions are added to it. Reopened answers go
     through the same safe rendering as new ones.
   - The single conversation version 0.5 saved (`dsu-chat:last-conversation`) is moved into the
     list the first time the new version loads.
   - If the browser blocks storage (some private modes), the chat still works but nothing is kept.
+- **Who and when:** under each message is "You" or the assistant's name, a dot, and how long
+  ago: "Just now", "5 Mins Ago", "2 Hrs Ago", "3 Days Ago" (`timeAgo()` in `dsu-chat.js`). The times update
+  every minute while the panel is open. Conversations saved before version 0.7 have no time per
+  message, so their messages show the conversation's last update.
+- **Thumbs up / down:** beside each answer (not the welcome or error messages). They appear when
+  the answer is hovered or a thumb has keyboard focus, and always on touch screens. Clicking one
+  turns it blue (screen readers hear "pressed"); clicking it again, or the other one, changes the
+  choice. **Visual only for now:** the choice isn't sent or saved, and resets when a saved
+  conversation is reopened.
 - **Question box:** the character count and a round send arrow (labeled "Send" for screen
   readers) sit inside the box. Enter also sends.
 - **Full screen:** the button next to the X fills the browser window. Messages sit in a centered
@@ -214,5 +226,5 @@ request.
 
 ## Not built yet
 
-- Thumbs up/down feedback: needs a `/feedback` endpoint on the backend first.
+- Sending thumbs up/down: the buttons exist, but recording the choice needs a `/feedback` endpoint on the backend first.
 - Conversation memory (follow-up questions).

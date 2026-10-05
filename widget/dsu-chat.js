@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.6.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.8.0"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
 
@@ -363,14 +363,15 @@
       </section>
     </div>`;
 
-  /** "just now", "5m ago", "3h ago", "2d ago". */
-  function timeAgo(ms) {
-    const minutes = Math.floor((Date.now() - ms) / 60000);
-    if (minutes < 1) return "just now";
-    if (minutes < 60) return `${minutes}m ago`;
+  /** How long ago, kept general on purpose: "Just now", "5 Mins Ago", "2 Hrs Ago", "3 Days Ago". */
+  function timeAgo(ms, now = Date.now()) {
+    const minutes = Math.max(0, Math.floor((now - ms) / 60000));
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} ${minutes === 1 ? "Min Ago" : "Mins Ago"}`;
     const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
+    if (hours < 24) return `${hours} ${hours === 1 ? "Hr Ago" : "Hrs Ago"}`;
+    const days = Math.floor(hours / 24);
+    return `${days} ${days === 1 ? "Day Ago" : "Days Ago"}`;
   }
 
   // ---- Saved conversations ---------------------------------------------------------------------
@@ -468,16 +469,6 @@
 
   function newConversationId(now) {
     return `c${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  }
-
-  /** "Oct 5, 3:04 PM" */
-  function shortDateTime(ms) {
-    return new Date(ms).toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
   }
 
   /**
@@ -591,7 +582,7 @@
       messages.textContent = "";
       conversation = null;
       shownId = "new";
-      addBotText(MESSAGES.welcome);
+      addBotText(MESSAGES.welcome, Date.now());
       showChat();
     }
 
@@ -599,10 +590,12 @@
     function openConversation(saved) {
       if (shownId !== saved.id) {
         messages.textContent = "";
-        addBotText(MESSAGES.welcome);
+        addBotText(MESSAGES.welcome, saved.created || saved.updated);
         for (const m of saved.messages) {
-          if (m.role === "user") addMessage("user", (el) => (el.textContent = String(m.text)));
-          else if (m.data && typeof m.data.answer === "string") addAnswer(m.data);
+          // Conversations saved before version 0.7 have no per-message time: use the last update.
+          const at = typeof m.at === "number" ? m.at : saved.updated;
+          if (m.role === "user") userMessage(String(m.text), at);
+          else if (m.data && typeof m.data.answer === "string") addAnswer(m.data, at);
         }
         conversation = saved;
         shownId = saved.id;
@@ -610,6 +603,19 @@
       showChat();
       const last = messages.lastElementChild;
       if (last) messages.scrollTop = last.offsetTop - messages.offsetTop - 16;
+    }
+
+    /** Plain text of a conversation's last answer, for previews. Built safely, then read back. */
+    function lastSnippet(saved) {
+      const lastBot = [...saved.messages].reverse().find((m) => m.role === "bot");
+      if (lastBot && typeof lastBot.data?.answer === "string") {
+        const scratch = document.createElement("div");
+        scratch.appendChild(renderMarkdown(lastBot.data.answer, document));
+        // One space between paragraphs and list items, so they don't run together.
+        const parts = [...scratch.querySelectorAll("p, li")].map((el) => el.textContent);
+        return (parts.length ? parts.join(" ") : scratch.textContent).replace(/\s+/g, " ").trim();
+      }
+      return saved.title || conversationTitle(saved.messages);
     }
 
     function resumeLast() {
@@ -633,15 +639,7 @@
     /** Fills the Resume and Past cards. Text only, through textContent. */
     function updateHome() {
       const last = history[0] || null;
-      const lastBot = last ? [...last.messages].reverse().find((m) => m.role === "bot") : null;
-      let snippet = "";
-      if (lastBot && typeof lastBot.data?.answer === "string") {
-        const scratch = document.createElement("div");
-        scratch.appendChild(renderMarkdown(lastBot.data.answer, document));
-        snippet = scratch.textContent.replace(/\s+/g, " ").trim();
-      } else if (last) {
-        snippet = last.title;
-      }
+      const snippet = last ? lastSnippet(last) : "";
       resume.setAttribute("aria-disabled", String(!last));
       $(".card-snippet").textContent = last ? snippet : "You don't have a conversation yet.";
       $(".card-meta").textContent = last
@@ -660,19 +658,23 @@
         const button = document.createElement("button");
         button.type = "button";
         button.className = "history-item";
+        const avatar = document.createElement("span");
+        avatar.className = "avatar avatar-list";
+        avatar.setAttribute("aria-hidden", "true");
         const text = document.createElement("span");
         text.className = "history-text";
         const title = document.createElement("span");
         title.className = "history-title";
-        title.textContent = saved.title || conversationTitle(saved.messages);
-        const questions = saved.messages.filter((m) => m.role === "user").length;
+        title.textContent = lastSnippet(saved);
         const meta = document.createElement("span");
         meta.className = "history-meta";
-        meta.textContent = `${shortDateTime(saved.updated)} · ${questions} ${
-          questions === 1 ? "question" : "questions"
-        }`;
+        meta.dataset.at = String(saved.updated);
+        meta.dataset.who = options.title;
+        meta.textContent = `${options.title} · ${timeAgo(saved.updated)}`;
         text.append(title, meta);
-        button.appendChild(text);
+        // Screen readers also hear the first question, so similar answers can be told apart.
+        const first = srOnly(document, `. First question: ${saved.title || conversationTitle(saved.messages)}`);
+        button.append(avatar, text, first, chevronIcon());
         button.addEventListener("click", () => openConversation(saved));
         const li = document.createElement("li");
         li.appendChild(button);
@@ -801,11 +803,12 @@
         showChat();
       }
       showFormError("");
-      addMessage("user", (el) => (el.textContent = question));
+      const askedAt = Date.now();
+      userMessage(question, askedAt);
       input.value = "";
       updateCount();
       setBusy(true);
-      const loading = addMessage("bot loading", (el) => {
+      const loading = addMessage("bot loading", null, (el) => {
         const dots = document.createElement("span");
         dots.className = "dots";
         dots.setAttribute("aria-hidden", "true");
@@ -822,9 +825,10 @@
         });
         const data = await response.json().catch(() => null);
         if (response.ok && data && typeof data.answer === "string") {
-          addAnswer(data);
-          remember({ role: "user", text: question });
-          remember({ role: "bot", data: { answer: data.answer, sources: data.sources } });
+          const answeredAt = Date.now();
+          addAnswer(data, answeredAt);
+          remember({ role: "user", text: question, at: askedAt });
+          remember({ role: "bot", at: answeredAt, data: { answer: data.answer, sources: data.sources } });
         } else if (response.status === 422 && typeof data?.detail === "string") {
           failed(data.detail, question); // the API's own message, e.g. question too long
         } else if (response.status === 503) {
@@ -846,7 +850,7 @@
     }
 
     function failed(text, question) {
-      addMessage("bot error", (el) => {
+      addMessage("bot error", Date.now(), (el) => {
         const p = document.createElement("p");
         p.textContent = text;
         el.appendChild(p);
@@ -860,16 +864,20 @@
       });
     }
 
-    function addBotText(text) {
-      addMessage("bot", (el) => {
+    function userMessage(text, at) {
+      addMessage("user", at, (el) => (el.textContent = text));
+    }
+
+    function addBotText(text, at = Date.now()) {
+      addMessage("bot", at, (el) => {
         const p = document.createElement("p");
         p.textContent = text;
         el.appendChild(p);
       });
     }
 
-    function addAnswer(data) {
-      addMessage("bot", (el) => {
+    function addAnswer(data, at = Date.now()) {
+      addMessage("bot", at, (el) => {
         const answer = document.createElement("div");
         answer.className = "answer";
         answer.appendChild(renderMarkdown(data.answer, document));
@@ -879,7 +887,42 @@
           (s) => s && typeof s.url === "string" && isSafeUrl(s.url)
         );
         if (sources.length) el.appendChild(sourceCards(sources));
+      }, feedbackButtons);
+    }
+
+    /**
+     * Thumbs up / thumbs down beside an answer. They show when the answer is hovered or a button
+     * has keyboard focus, and stay visible once one is chosen. Visual only for now: the choice
+     * isn't sent or saved anywhere yet (that needs a /feedback endpoint, see README).
+     */
+    function feedbackButtons() {
+      const box = document.createElement("div");
+      box.className = "feedback";
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-label", "Was this answer helpful?");
+      const choices = [
+        ["up", "Helpful", "M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"],
+        ["down", "Not helpful", "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"],
+      ];
+      const buttons = choices.map(([value, label, d]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `feedback-${value}`;
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", "false");
+        button.title = label;
+        button.appendChild(svgIcon(d, 16));
+        return button;
       });
+      for (const button of buttons) {
+        button.addEventListener("click", () => {
+          const on = button.getAttribute("aria-pressed") !== "true";
+          for (const b of buttons) b.setAttribute("aria-pressed", String(on && b === button));
+          box.classList.toggle("chosen", on); // keep the buttons visible once one is picked
+        });
+      }
+      box.append(...buttons);
+      return box;
     }
 
     function sourceCards(sources) {
@@ -916,15 +959,80 @@
     }
 
     /** Appends a message bubble; `fill(el)` adds its content with DOM calls, never HTML. */
-    function addMessage(kind, fill) {
+    /**
+     * Appends a message bubble; `fill(el)` adds its content with DOM calls, never HTML. With a time
+     * (`at`), the bubble and a "You · 5 Mins" / "Ask DSU · 2 Hrs" line under it are added as one
+     * group. The loading bubble has no time. Returns the bubble.
+     */
+    function addMessage(kind, at, fill, beside) {
       const el = document.createElement("div");
       el.className = `message ${kind}`;
       fill(el);
-      messages.appendChild(el); // added whole, so the live region reads it once
+      let bubble = el;
+      if (beside) {
+        // Something next to the bubble, like the feedback buttons.
+        bubble = document.createElement("div");
+        bubble.className = "bubble-row";
+        bubble.append(el, beside());
+      }
+      let added = bubble;
+      if (typeof at === "number") {
+        const who = kind.startsWith("user") ? "You" : options.title;
+        const meta = document.createElement("p");
+        meta.className = "message-meta";
+        meta.dataset.at = String(at);
+        meta.dataset.who = who;
+        meta.textContent = `${who} · ${timeAgo(at)}`;
+        added = document.createElement("div");
+        added.className = `message-group ${kind.startsWith("user") ? "user" : "bot"}`;
+        added.append(bubble, meta);
+      }
+      messages.appendChild(added); // added whole, so the live region reads it once
       // Scroll to the start of the new message, so a long answer is read from the top.
-      messages.scrollTop = el.offsetTop - messages.offsetTop - 16;
+      messages.scrollTop = added.offsetTop - messages.offsetTop - 16;
       return el;
     }
+
+    /** A small filled icon from one SVG path (built with DOM calls). */
+    function svgIcon(d, size) {
+      const NS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("width", String(size));
+      svg.setAttribute("height", String(size));
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+      const path = document.createElementNS(NS, "path");
+      path.setAttribute("fill", "currentColor");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+      return svg;
+    }
+
+    /** A ">" icon for the Past Conversations rows (SVG built with DOM calls). */
+    function chevronIcon() {
+      const NS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("class", "chevron");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("width", "22");
+      svg.setAttribute("height", "22");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+      const path = document.createElementNS(NS, "path");
+      path.setAttribute("fill", "currentColor");
+      path.setAttribute("d", "M9.3 5.3 10.7 3.9 18.8 12l-8.1 8.1-1.4-1.4 6.7-6.7z");
+      svg.appendChild(path);
+      return svg;
+    }
+
+    // Keep "5 Mins" and "2 Hrs" current while the panel is open.
+    setInterval(() => {
+      if (panel.hidden) return;
+      for (const el of root.querySelectorAll("[data-at]")) {
+        el.textContent = `${el.dataset.who} · ${timeAgo(Number(el.dataset.at))}`;
+      }
+    }, 60000);
   }
 
   // Read our own <script> tag now; document.currentScript is only set while this file runs.
@@ -942,7 +1050,7 @@
     const options = {
       apiUrl,
       cssUrl: cssUrl.href,
-      title: script.dataset.title || "Ask DSU", //make it a name, to make it more personable?
+      title: script.dataset.title || "Ask DSU", //make it a name to make it more personable? Jada, Nadia, Nia, 
       maxChars: Number(script.dataset.maxChars) || 1000, // keep in sync with CHAT_MAX_QUESTION_CHARS
     };
     if (document.body) mount(options);
@@ -957,6 +1065,7 @@
       renderMarkdown,
       formatDate,
       conversationTitle,
+      timeAgo,
       pruneHistory,
       upsertConversation,
       loadHistory,

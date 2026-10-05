@@ -7,6 +7,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const {
   conversationTitle,
+  timeAgo,
   pruneHistory,
   upsertConversation,
   loadHistory,
@@ -133,4 +134,16 @@ test("blocked or corrupt storage never throws", () => {
   assert.equal(saveHistory(blockedStorage, [convo("a", NOW)]), false);
   const corrupt = memoryStorage({ [HISTORY_KEY]: "{not json" });
   assert.deepEqual(loadHistory(corrupt, NOW), []);
+});
+
+test("times are general: minutes, hours, days", () => {
+  const MIN = 60 * 1000;
+  assert.equal(timeAgo(NOW - 20 * 1000, NOW), "Just now");
+  assert.equal(timeAgo(NOW - MIN, NOW), "1 Min Ago");
+  assert.equal(timeAgo(NOW - 59 * MIN, NOW), "59 Mins Ago");
+  assert.equal(timeAgo(NOW - 60 * MIN, NOW), "1 Hr Ago");
+  assert.equal(timeAgo(NOW - 5 * 60 * MIN, NOW - 1), "4 Hrs Ago");
+  assert.equal(timeAgo(NOW - DAY, NOW), "1 Day Ago");
+  assert.equal(timeAgo(NOW - 3 * DAY - 5 * 60 * MIN, NOW), "3 Days Ago");
+  assert.equal(timeAgo(NOW + MIN, NOW), "Just now", "a clock that's slightly off never shows a negative time");
 });
