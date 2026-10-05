@@ -4,8 +4,7 @@ The chat window DSU adds to its website. A red **Ask DSU** button sits in the bo
 and opens a chat panel (full screen on phones). The panel opens on a home screen: the assistant's
 avatar, "Welcome to Delaware State University! How can we help you today?" over an aerial campus
 photo with a red gradient,
-and **Start New Conversation** (blue), **Resume Last Conversation**, and **See Past Conversations**
-(not built yet, marked "Coming soon"). Buttons in the top-right corner make the panel full screen
+and **Start New Conversation** (blue), **Resume Last Conversation**, and **See Past Conversations**. Buttons in the top-right corner make the panel full screen
 and close it. Students type a question. The widget sends it to
 the backend's `POST /chat` and shows the answer with its sources as small cards (title, link, and
 "Last updated" date).
@@ -23,6 +22,7 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 | `dsu-chat-mock.js` | Saved `/chat` replies for mock mode (demo page only, never embedded) |
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
 | `tests/mock.test.js` | Checks that mock mode never makes a network request |
+| `tests/history.test.js` | Checks saved conversations: limits, expiry, moving the old save, blocked storage |
 
 ## Embedding it on a site (Drupal)
 
@@ -57,7 +57,7 @@ Colors come from the [DSU Branding Tool Kit (August 2023)](https://www.desu.edu/
 | Red, Pantone 485 C, `#EE3124` | Header gradient over the photo, avatar shirt | Shaded with brand black (30%): white text 5.6:1 behind the welcome text, 4.7:1 at the right edge, even over a white spot in the photo |
 | Darker red `#D51C28` (athletics red, not in the tool kit) | Ask DSU launcher, links, source titles | White 5.22:1, 4.8:1 on the light gray |
 | Dark blue `#00549A` (chosen by the team, not in the tool kit) | Start New Conversation button, send arrow, card and source-card edges, chevrons, loading dots | White 7.9:1 |
-| Blue, Pantone 299 C, `#009DDC` | Your messages, "Coming soon" badge, avatar background | Brand black text 5.32:1 |
+| Blue, Pantone 299 C, `#009DDC` | Your messages, avatar background | Brand black text 5.32:1 |
 | Black, Process Black, `#231F20` | Main text, focus ring, header shading | 16.3:1 on white |
 
 **Font:** Roboto (the tool kit names Myriad Pro for print, which is a licensed Adobe font). The
@@ -95,16 +95,31 @@ rights with Marketing & Communications before going live.
 
 ## How it behaves
 
-- **Home screen:** Start New Conversation clears the chat and shows the welcome message. Resume
-  Last Conversation reopens the last chat, even after a page reload: the questions and answers
-  are kept in the browser's `localStorage` (last 40 messages, never sent anywhere). Starting a new
-  conversation deletes it. If storage is blocked, the chat still works but isn't kept. The back
-  arrow in the chat header returns to the home screen.
+- **Home screen:** Start New Conversation opens a new chat with the welcome message. Resume Last
+  Conversation reopens the most recent saved conversation. See Past Conversations lists the
+  saved ones. The back arrow in the chat header returns to the home screen.
+- **Saved conversations (Past Conversations):**
+  - Kept in the browser's `localStorage` under `dsu-chat:conversations`, on this device only.
+    Nothing is sent anywhere, and nothing is tied to a student, so this stays within decision
+    0001 (no logins, no student records).
+  - Each conversation keeps its questions and answers (with sources), up to 40 messages. Only
+    answered questions are saved, not error messages.
+  - Limits: the last 10 conversations, each kept for up to 30 days after its last message. Older
+    ones are removed when the widget loads. The limits are `MAX_CONVERSATIONS` and
+    `MAX_AGE_DAYS` at the top of the storage section in `dsu-chat.js`. If you change them,
+    change the note on the Past Conversations screen too.
+  - The screen says conversations are saved on this device and visible to anyone using the
+    browser, which matters on shared lab and library computers. **Delete all conversations**
+    (with a confirm step) clears them.
+  - Tapping a conversation reopens it, and new questions are added to it. Reopened answers go
+    through the same safe rendering as new ones.
+  - The single conversation version 0.5 saved (`dsu-chat:last-conversation`) is moved into the
+    list the first time the new version loads.
+  - If the browser blocks storage (some private modes), the chat still works but nothing is kept.
 - **Question box:** the character count and a round send arrow (labeled "Send" for screen
   readers) sit inside the box. Enter also sends.
 - **Full screen:** the button next to the X fills the browser window. Messages sit in a centered
-  column, each a little under half its width. Press it
-  again to go back. Phones are always full screen, so it's hidden there.
+  column, each a little under half its width. Press it again to go back. Phones are always full screen, so it's hidden there.
 - **One question at a time:** each question is sent on its own. The backend doesn't get earlier
   questions or answers, so a follow-up like "how much is it?" won't know what "it" means. The
   welcome message tells students to include the details each time.
@@ -199,6 +214,5 @@ request.
 
 ## Not built yet
 
-- See Past Conversations: the card is shown but does nothing yet (it says "Coming soon").
 - Thumbs up/down feedback: needs a `/feedback` endpoint on the backend first.
 - Conversation memory (follow-up questions).

@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.5.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.6.0"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
 
@@ -232,8 +232,14 @@
   // The widget: launcher button, chat panel, and the call to POST /chat.
   // ---------------------------------------------------------------------------------------------
 
-  const STORAGE_KEY = "dsu-chat:last-conversation";
-  const MAX_SAVED_MESSAGES = 40;
+  // Saved conversations live in the browser's localStorage, on this device only (see README).
+  // If you change the limits, change the note in the Past Conversations screen (SHELL) too.
+  const HISTORY_KEY = "dsu-chat:conversations";
+  const LEGACY_KEY = "dsu-chat:last-conversation"; // the one conversation version 0.5 saved
+  const MAX_CONVERSATIONS = 10;
+  const MAX_AGE_DAYS = 30;
+  const MAX_SAVED_MESSAGES = 40; // per conversation
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
   // Icons used in SHELL. Static markup, no outside text.
   const ICON = {
@@ -289,11 +295,9 @@
               </span>
               ${ICON.chevron}
             </button>
-            <button class="card past" type="button" aria-disabled="true"
-              aria-describedby="past-soon">
+            <button class="card past" type="button">
               <span class="card-text">
-                <span class="card-title">See Past Conversations
-                  <span class="badge" id="past-soon">Coming soon</span></span>
+                <span class="card-title">See Past Conversations</span>
                 <span class="card-meta past-meta"></span>
               </span>
               ${ICON.chevron}
@@ -329,6 +333,33 @@
             <p class="form-error" id="form-error" role="alert"></p>
           </form>
         </div>
+        <div class="view past-view" hidden>
+          <header class="header">
+            <button class="icon-button back" type="button" aria-label="Back to home">${ICON.back}</button>
+            <span class="avatar avatar-header" aria-hidden="true"></span>
+            <h2 class="title">Past Conversations</h2>
+            ${WINDOW_BUTTONS}
+          </header>
+          <p class="notice">
+            Conversations are saved in this browser on this device only, so anyone who uses this
+            browser can see them. The last 10 are kept for up to 30 days.
+          </p>
+          <div class="history-body">
+            <ul class="history" aria-label="Past conversations"></ul>
+            <p class="history-empty" hidden>No past conversations yet.</p>
+            <div class="history-actions">
+              <button class="delete-all" type="button">Delete all conversations</button>
+              <div class="confirm" role="group" aria-labelledby="confirm-text" hidden>
+                <p id="confirm-text">Delete all saved conversations on this device? This can't be undone.</p>
+                <div class="confirm-buttons">
+                  <button class="confirm-delete" type="button">Delete all</button>
+                  <button class="confirm-cancel" type="button">Cancel</button>
+                </div>
+              </div>
+            </div>
+            <p class="sr-only" role="status" id="history-status"></p>
+          </div>
+        </div>
       </section>
     </div>`;
 
@@ -342,23 +373,111 @@
     return `${Math.floor(hours / 24)}d ago`;
   }
 
-  /** The saved conversation, or null. Storage can be blocked or full, so never let it throw. */
-  function loadConversation() {
+  // ---- Saved conversations ---------------------------------------------------------------------
+  // A conversation: { id, created, updated, title, messages: [{ role: "user", text } |
+  // { role: "bot", data: { answer, sources } }] }. Only successful questions and answers are kept.
+
+  /** The first question, shortened, as the conversation's title. */
+  function conversationTitle(messages) {
+    const first = messages.find((m) => m && m.role === "user" && typeof m.text === "string");
+    const text = first ? first.text.replace(/\s+/g, " ").trim() : "";
+    if (!text) return "Conversation";
+    return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+  }
+
+  /** Valid conversations from the last MAX_AGE_DAYS, newest first, at most MAX_CONVERSATIONS. */
+  function pruneHistory(items, now) {
+    return (Array.isArray(items) ? items : [])
+      .filter(
+        (c) =>
+          c &&
+          typeof c.id === "string" &&
+          typeof c.updated === "number" &&
+          Array.isArray(c.messages) &&
+          c.messages.length > 0 &&
+          now - c.updated < MAX_AGE_DAYS * DAY_MS
+      )
+      .sort((a, b) => b.updated - a.updated)
+      .slice(0, MAX_CONVERSATIONS);
+  }
+
+  /** The list with `conversation` at the front, replacing an older copy with the same id. */
+  function upsertConversation(items, conversation, now) {
+    return pruneHistory([conversation, ...items.filter((c) => c.id !== conversation.id)], now);
+  }
+
+  /** Writes the list. Storage can be blocked or full, so this never throws. */
+  function saveHistory(storage, items) {
     try {
-      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
-      return saved && Array.isArray(saved.messages) && saved.messages.length ? saved : null;
+      if (items.length) {
+        storage.setItem(HISTORY_KEY, JSON.stringify({ version: 1, conversations: items }));
+      } else {
+        storage.removeItem(HISTORY_KEY);
+      }
+      return true;
     } catch {
-      return null;
+      return false; // private browsing or storage full: conversations just aren't kept
     }
   }
 
-  function saveConversation(conversation) {
+  /**
+   * Reads the saved list, drops expired conversations, and moves the single conversation older
+   * versions saved (LEGACY_KEY) into the list. Never throws; returns [] if storage is unusable.
+   */
+  function loadHistory(storage, now) {
+    let items = [];
+    let legacy = null;
     try {
-      if (conversation) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversation));
-      else window.localStorage.removeItem(STORAGE_KEY);
+      const saved = JSON.parse(storage.getItem(HISTORY_KEY) || "null");
+      if (saved && Array.isArray(saved.conversations)) items = saved.conversations;
+      legacy = JSON.parse(storage.getItem(LEGACY_KEY) || "null");
     } catch {
-      // private browsing or storage full: the conversation just isn't kept after a reload
+      return [];
     }
+    if (legacy && Array.isArray(legacy.messages) && legacy.messages.length) {
+      const updated = typeof legacy.updated === "number" ? legacy.updated : now;
+      items.push({
+        id: `c${updated.toString(36)}`,
+        created: updated,
+        updated,
+        title: conversationTitle(legacy.messages),
+        messages: legacy.messages,
+      });
+    }
+    const pruned = pruneHistory(items, now);
+    if (saveHistory(storage, pruned) && legacy) {
+      try {
+        storage.removeItem(LEGACY_KEY); // only once the new list is safely written
+      } catch {
+        // ignore
+      }
+    }
+    return pruned;
+  }
+
+  /** window.localStorage, or a stand-in that keeps nothing if the browser blocks it. */
+  function browserStorage() {
+    try {
+      const storage = window.localStorage;
+      if (storage) return storage;
+    } catch {
+      // blocked (for example, third-party storage disabled)
+    }
+    return { getItem: () => null, setItem() {}, removeItem() {} };
+  }
+
+  function newConversationId(now) {
+    return `c${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  /** "Oct 5, 3:04 PM" */
+  function shortDateTime(ms) {
+    return new Date(ms).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
   }
 
   /**
@@ -408,6 +527,11 @@
     const panel = $(".panel");
     const home = $(".home");
     const chat = $(".chat");
+    const pastView = $(".past-view");
+    const historyList = $(".history");
+    const historyStatus = $("#history-status");
+    const confirmBox = $(".confirm");
+    const deleteAll = $(".delete-all");
     const resume = $(".resume");
     const messages = $(".messages");
     const form = $(".form");
@@ -416,12 +540,14 @@
     const formError = $("#form-error");
     const send = $(".send");
     let busy = false;
-    // The conversation on screen: { updated, messages: [{ role: "user", text } | { role: "bot", data }] }
-    let conversation = loadConversation();
-    let shown = false; // has `conversation` been drawn into .messages yet?
+    const storage = browserStorage();
+    let history = loadHistory(storage, Date.now()); // saved conversations, newest first
+    let conversation = null; // the conversation on screen, once it has a saved question
+    // What .messages shows: a conversation id, "new" for a new one, or null for nothing yet.
+    let shownId = null;
 
     $(".launcher-label").textContent = options.title;
-    $(".title").textContent = options.title;
+    $(".chat .title").textContent = options.title;
     panel.setAttribute("aria-label", options.title);
     updateCount();
     updateHome();
@@ -431,7 +557,9 @@
       widget.classList.add("open");
       launcher.setAttribute("aria-expanded", "true");
       updateHome();
-      (chat.hidden ? $(".start") : input).focus();
+      if (!chat.hidden) input.focus();
+      else if (!pastView.hidden) pastView.querySelector(".back").focus();
+      else $(".start").focus();
     }
 
     function close() {
@@ -441,73 +569,154 @@
       launcher.focus();
     }
 
+    /** Shows one of the three screens: home, chat, or past-view. */
+    function showView(view) {
+      home.hidden = view !== home;
+      chat.hidden = view !== chat;
+      pastView.hidden = view !== pastView;
+    }
+
     function showHome() {
       updateHome();
-      chat.hidden = true;
-      home.hidden = false;
+      showView(home);
       $(".start").focus();
     }
 
     function showChat() {
-      home.hidden = true;
-      chat.hidden = false;
+      showView(chat);
       input.focus();
     }
 
     function startNew() {
       messages.textContent = "";
       conversation = null;
-      shown = true;
-      saveConversation(null);
+      shownId = "new";
       addBotText(MESSAGES.welcome);
       showChat();
     }
 
-    function resumeLast() {
-      if (!conversation) return;
-      if (!shown) {
+    /** Reopens a saved conversation. Answers go through addAnswer, the same as new ones. */
+    function openConversation(saved) {
+      if (shownId !== saved.id) {
         messages.textContent = "";
         addBotText(MESSAGES.welcome);
-        for (const m of conversation.messages) {
+        for (const m of saved.messages) {
           if (m.role === "user") addMessage("user", (el) => (el.textContent = String(m.text)));
           else if (m.data && typeof m.data.answer === "string") addAnswer(m.data);
         }
-        shown = true;
+        conversation = saved;
+        shownId = saved.id;
       }
       showChat();
       const last = messages.lastElementChild;
       if (last) messages.scrollTop = last.offsetTop - messages.offsetTop - 16;
     }
 
+    function resumeLast() {
+      if (history.length) openConversation(history[0]);
+    }
+
     function remember(entry) {
-      conversation = conversation || { messages: [] };
+      const now = Date.now();
+      if (!conversation) {
+        conversation = { id: newConversationId(now), created: now, messages: [] };
+        if (shownId === "new" || shownId === null) shownId = conversation.id;
+      }
       conversation.messages.push(entry);
       conversation.messages = conversation.messages.slice(-MAX_SAVED_MESSAGES);
-      conversation.updated = Date.now();
-      saveConversation(conversation);
+      conversation.updated = now;
+      conversation.title = conversationTitle(conversation.messages);
+      history = upsertConversation(history, conversation, now);
+      saveHistory(storage, history);
     }
 
     /** Fills the Resume and Past cards. Text only, through textContent. */
     function updateHome() {
-      const lastBot = conversation
-        ? [...conversation.messages].reverse().find((m) => m.role === "bot")
-        : null;
+      const last = history[0] || null;
+      const lastBot = last ? [...last.messages].reverse().find((m) => m.role === "bot") : null;
       let snippet = "";
       if (lastBot && typeof lastBot.data?.answer === "string") {
         const scratch = document.createElement("div");
         scratch.appendChild(renderMarkdown(lastBot.data.answer, document));
         snippet = scratch.textContent.replace(/\s+/g, " ").trim();
-      } else if (conversation) {
-        snippet = String(conversation.messages[conversation.messages.length - 1].text || "");
+      } else if (last) {
+        snippet = last.title;
       }
-      resume.setAttribute("aria-disabled", String(!conversation));
-      $(".card-snippet").textContent = conversation ? snippet : "You don't have a conversation yet.";
-      $(".card-meta").textContent = conversation
-        ? `${options.title} · ${timeAgo(conversation.updated)}`
+      resume.setAttribute("aria-disabled", String(!last));
+      $(".card-snippet").textContent = last ? snippet : "You don't have a conversation yet.";
+      $(".card-meta").textContent = last
+        ? `${options.title} · ${timeAgo(last.updated)}`
         : "Start one to see it here.";
-      $(".past-meta").textContent = conversation
-        ? `Last conversation ended ${timeAgo(conversation.updated)}`
+      const n = history.length;
+      $(".past-meta").textContent = n
+        ? `${n} saved ${n === 1 ? "conversation" : "conversations"} on this device`
         : "No past conversations yet";
+    }
+
+    /** The Past Conversations list. Titles are the student's own text: textContent only. */
+    function renderHistory() {
+      historyList.textContent = "";
+      for (const saved of history) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "history-item";
+        const text = document.createElement("span");
+        text.className = "history-text";
+        const title = document.createElement("span");
+        title.className = "history-title";
+        title.textContent = saved.title || conversationTitle(saved.messages);
+        const questions = saved.messages.filter((m) => m.role === "user").length;
+        const meta = document.createElement("span");
+        meta.className = "history-meta";
+        meta.textContent = `${shortDateTime(saved.updated)} · ${questions} ${
+          questions === 1 ? "question" : "questions"
+        }`;
+        text.append(title, meta);
+        button.appendChild(text);
+        button.addEventListener("click", () => openConversation(saved));
+        const li = document.createElement("li");
+        li.appendChild(button);
+        historyList.appendChild(li);
+      }
+      const empty = history.length === 0;
+      historyList.hidden = empty;
+      $(".history-empty").hidden = !empty;
+      deleteAll.hidden = empty;
+      confirmBox.hidden = true;
+    }
+
+    function showPast() {
+      history = pruneHistory(history, Date.now());
+      renderHistory();
+      historyStatus.textContent = "";
+      showView(pastView);
+      (historyList.querySelector("button") || pastView.querySelector(".back")).focus();
+    }
+
+    function askDeleteAll() {
+      deleteAll.hidden = true;
+      confirmBox.hidden = false;
+      $(".confirm-cancel").focus();
+    }
+
+    function cancelDeleteAll() {
+      confirmBox.hidden = true;
+      deleteAll.hidden = false;
+      deleteAll.focus();
+    }
+
+    function confirmDeleteAll() {
+      history = [];
+      saveHistory(storage, history);
+      if (conversation) {
+        // The open chat was saved, so it's gone too.
+        messages.textContent = "";
+        conversation = null;
+        shownId = null;
+      }
+      renderHistory();
+      historyStatus.textContent = "All saved conversations were deleted.";
+      pastView.querySelector(".back").focus();
     }
 
     function toggleFullscreen() {
@@ -522,9 +731,13 @@
     launcher.addEventListener("click", () => (panel.hidden ? open() : close()));
     for (const button of $$(".close")) button.addEventListener("click", close);
     for (const button of $$(".expand")) button.addEventListener("click", toggleFullscreen);
-    $(".back").addEventListener("click", showHome);
+    for (const button of $$(".back")) button.addEventListener("click", showHome);
     $(".start").addEventListener("click", startNew);
     resume.addEventListener("click", resumeLast);
+    $(".past").addEventListener("click", showPast);
+    deleteAll.addEventListener("click", askDeleteAll);
+    $(".confirm-cancel").addEventListener("click", cancelDeleteAll);
+    $(".confirm-delete").addEventListener("click", confirmDeleteAll);
     panel.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
@@ -579,11 +792,11 @@
         return;
       }
 
-      if (!shown) {
+      if (shownId === null) {
         // Asked without Start or Resume (for example from a script): begin a new conversation.
         messages.textContent = "";
         conversation = null;
-        shown = true;
+        shownId = "new";
         addBotText(MESSAGES.welcome);
         showChat();
       }
@@ -729,7 +942,7 @@
     const options = {
       apiUrl,
       cssUrl: cssUrl.href,
-      title: script.dataset.title || "Ask DSU",
+      title: script.dataset.title || "Ask DSU", //make it a name, to make it more personable?
       maxChars: Number(script.dataset.maxChars) || 1000, // keep in sync with CHAT_MAX_QUESTION_CHARS
     };
     if (document.body) mount(options);
@@ -737,7 +950,22 @@
   }
 
   if (typeof module === "object" && module.exports) {
-    module.exports = { isSafeUrl, parseMarkdown, renderMarkdown, formatDate }; // for the tests
+    // for the tests
+    module.exports = {
+      isSafeUrl,
+      parseMarkdown,
+      renderMarkdown,
+      formatDate,
+      conversationTitle,
+      pruneHistory,
+      upsertConversation,
+      loadHistory,
+      saveHistory,
+      HISTORY_KEY,
+      LEGACY_KEY,
+      MAX_CONVERSATIONS,
+      MAX_AGE_DAYS,
+    };
   }
   if (typeof document !== "undefined") boot();
 })();
