@@ -105,6 +105,8 @@
           if (!button || !input) return;
           const launcher = root.querySelector("[aria-controls]");
           if (launcher?.getAttribute("aria-expanded") === "false") launcher.click();
+          const start = root.querySelector(".start");
+          if (start?.offsetParent) start.click(); // on the home screen: start a new chat
           input.value = button.hasAttribute("data-fill-too-long")
             ? "a".repeat(1001)
             : button.dataset.question;

@@ -2,35 +2,64 @@
  * DSU chat widget styles. Loaded by dsu-chat.js into the widget's Shadow DOM, so these rules
  * only affect the widget, and the host site's CSS doesn't affect it.
  *
+ * COLORS come from the DSU Branding Tool Kit (August 2023):
+ *   Pantone 485 C red     #EE3124   Pantone 299 C blue    #009DDC
+ *   Pantone 297 C lt blue #72CDF4   Process black         #231F20
+ * plus #D51C28, the darker athletics red, where small white text sits on red (#EE3124 with
+ * white is 4.12:1, which only passes for large text). See widget/README.md, "Branding".
+ *
  * BRANDING: set any of these on the host page (for example in :root) to restyle the widget.
  * Keep text/background pairs at a contrast ratio of at least 4.5:1 (WCAG 2.1 AA).
  *
- *   --dsu-chat-accent        launcher, send button, your messages, links   (default #a6192e)
- *   --dsu-chat-accent-text   text on the accent color                      (default #ffffff)
+ *   --dsu-chat-red           header gradient, avatar shirt                  (default #EE3124)
+ *   --dsu-chat-accent        small white-on-red: launcher, Send, links     (default #D51C28)
+ *   --dsu-chat-accent-text   text on the accent and red colors             (default #ffffff)
+ *   --dsu-chat-blue          Start button, icons, card accents             (default #009DDC)
+ *   --dsu-chat-light-blue    your messages, avatar background              (default #72CDF4)
  *   --dsu-chat-background    panel background                              (default #ffffff)
- *   --dsu-chat-surface       answer bubbles and source cards               (default #f3f4f6)
- *   --dsu-chat-text          main text                                     (default #1f2328)
+ *   --dsu-chat-surface       answer bubbles, home screen background        (default #f4f6f8)
+ *   --dsu-chat-text          main text                                     (default #231F20)
  *   --dsu-chat-muted         notice, counter, dates                        (default #4b5260)
  *   --dsu-chat-border        borders                                       (default #d1d5db)
- *   --dsu-chat-focus         keyboard focus outline                        (default #1f2328)
- *   --dsu-chat-font          font family                                   (default system fonts)
+ *   --dsu-chat-focus         keyboard focus outline                        (default #231F20)
+ *   --dsu-chat-font          font family                          (default Roboto, then Arial)
+ *   --dsu-chat-hero-image    header photo, as url(...)            (default url("dsu-campus.jpg"))
  */
 
 :host {
   all: initial; /* don't inherit the page's font, color, line height, ... */
-  --accent: var(--dsu-chat-accent, #a6192e);
+  --red: var(--dsu-chat-red, #ee3124);
+  --accent: var(--dsu-chat-accent, #d51c28);
   --accent-text: var(--dsu-chat-accent-text, #ffffff);
+  --blue: var(--dsu-chat-blue, #00549a); /*009ddc*/
+  --light-blue: var(--dsu-chat-light-blue, #009ddc); /*72cdf4*/
+  --black: #231f20;
   --bg: var(--dsu-chat-background, #ffffff);
-  --surface: var(--dsu-chat-surface, #f3f4f6);
-  --text: var(--dsu-chat-text, #1f2328);
+  --surface: var(--dsu-chat-surface, #f4f6f8);
+  --text: var(--dsu-chat-text, #231f20);
   --muted: var(--dsu-chat-muted, #4b5260);
   --border: var(--dsu-chat-border, #d1d5db);
-  --focus: var(--dsu-chat-focus, #1f2328);
+  --focus: var(--dsu-chat-focus, #231f20);
+  --hero-image: var(--dsu-chat-hero-image, url("dsu-campus.jpg"));
+  --avatar: url("dsu-avatar.svg");
   --error-bg: #fdecec;
   --error-text: #8a1c1c;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
-  font-family: var(--dsu-chat-font, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif);
-  font-size: 16px;
+  --shadow: 0 8px 28px rgba(35, 31, 32, 0.2);
+  /* Brand red fading to the right, then brand black, over the photo. Worst case (a pure white
+     spot in the photo): 5.6:1 behind the welcome text, 4.7:1 at the right edge. */
+  --hero-overlay: linear-gradient(rgba(35, 31, 32, 0.3), rgba(35, 31, 32, 0.3)),
+    linear-gradient(100deg, rgba(238, 49, 36, 0.92) 0%, rgba(238, 49, 36, 0.85) 55%,
+      rgba(238, 49, 36, 0.7) 100%);
+  /* "DSU Chat Roboto" is Roboto loaded by dsu-chat.js from fonts/ (see README, "Font"). */
+  font-family: var(
+    --dsu-chat-font,
+    "DSU Chat Roboto",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif
+  );
+  font-size: 15px;
   line-height: 1.5;
   color: var(--text);
 }
@@ -47,10 +76,23 @@ textarea {
   color: inherit;
 }
 
-/* Visible keyboard focus on everything that can take it. */
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Visible keyboard focus everywhere: a dark ring with a thin white gap, so it shows on white,
+   gray, red, and blue. On the blue header the colors swap. */
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
+.hero :focus-visible,
+.header :focus-visible,
+.start:focus-visible {
+  outline-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--black), 0 0 0 7px var(--black);
 }
 
 .sr-only {
@@ -69,6 +111,40 @@ textarea {
   display: none !important;
 }
 
+/* ---- Avatar (illustration in dsu-avatar.svg) --------------------------------------------- */
+
+.avatar {
+  display: inline-block;
+  flex: none;
+  border-radius: 50%;
+  background: var(--light-blue) var(--avatar) center / cover no-repeat;
+}
+
+.avatar-hero {
+  width: 60px;
+  height: 60px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(35, 31, 32, 0.3);
+}
+
+.avatar-header {
+  width: 34px;
+  height: 34px;
+  border: 2px solid #ffffff;
+}
+
+.avatar-small {
+  width: 32px;
+  height: 32px;
+}
+
+.avatar-launcher {
+  width: 32px;
+  height: 32px;
+  margin: -4px 0 -4px -8px;
+  border: 2px solid #ffffff;
+}
+
 /* ---- Launcher button ---------------------------------------------------------------------- */
 
 .launcher {
@@ -78,16 +154,18 @@ textarea {
   z-index: 2147483000;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-height: 48px;
-  padding: 12px 20px;
+  padding: 8px 18px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--accent);
   color: var(--accent-text);
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   box-shadow: var(--shadow);
   cursor: pointer;
+  transition: transform 0.15s ease;
 }
 
 .launcher:hover {
@@ -99,58 +177,265 @@ textarea {
 .panel {
   position: fixed;
   right: 20px;
-  bottom: 84px;
+  bottom: 88px;
   z-index: 2147483001;
   display: flex;
   flex-direction: column;
-  width: 380px;
+  width: 400px;
   max-width: calc(100vw - 40px);
-  height: 600px;
-  max-height: calc(100vh - 104px);
+  height: 640px;
+  max-height: calc(100vh - 108px);
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-top: 4px solid var(--accent);
-  border-radius: 12px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: var(--surface);
   box-shadow: var(--shadow);
+  animation: rise 0.2s ease-out;
 }
+
+.panel.fullscreen {
+  inset: 24px;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+}
+
+.fullscreen .launcher {
+  display: none;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Round icon buttons: full screen, close, back. White icons on the blue header (5.7:1+). */
+.window-buttons {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.expand .icon-shrink,
+.expand[aria-pressed="true"] .icon-expand {
+  display: none;
+}
+
+.expand[aria-pressed="true"] .icon-shrink {
+  display: block;
+}
+
+/* ---- Home screen -------------------------------------------------------------------------- */
+
+.home {
+  overflow-y: auto;
+}
+
+.hero {
+  flex: none;
+  padding: 20px 24px 52px;
+  background: var(--hero-overlay), var(--hero-image) center / cover no-repeat, var(--blue);
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(35, 31, 32, 0.5);
+}
+
+.hero-top {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.hero-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.hero-subtitle {
+  margin: 0;
+  font-size: 15px;
+}
+
+.home-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin: -22px auto 0;
+  padding: 0 24px 24px;
+}
+
+/* CONTRAST, to decide: white on brand blue #009DDC is 3.06:1. That passes for large text
+   (19px bold or 24px) but not at this size (4.5:1 needed). See README, "Branding". */
+.start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 20px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--blue);
+  color: var(--accent-text);
+  font-size: 16px;
+  font-weight: 500;
+  box-shadow: 0 2px 6px rgba(35, 31, 32, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.start:hover {
+  filter: brightness(0.92);
+}
+
+.start svg {
+  width: 20px;
+  height: 20px;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--blue);
+  border-radius: 6px;
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover:not([aria-disabled="true"]) {
+  border-color: var(--blue);
+  box-shadow: 0 2px 8px rgba(35, 31, 32, 0.12);
+}
+
+.card[aria-disabled="true"] {
+  cursor: default;
+}
+
+.card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.card-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.card-preview-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.card-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  font-size: 13px;
+}
+
+.card-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--light-blue);
+  color: var(--black); /* 9.1:1 */
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.chevron {
+  flex: none;
+  color: var(--blue); /* icon on white: 3.06:1 (3:1 needed) */
+}
+
+.resume[aria-disabled="true"] .chevron {
+  visibility: hidden;
+}
+
+/* ---- Chat header -------------------------------------------------------------------------- */
 
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 8px 6px 16px;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--hero-overlay), var(--hero-image) center / cover no-repeat, var(--blue);
+  color: #ffffff;
 }
 
 .title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.close:hover {
-  background: var(--surface);
+  font-size: 17px;
+  font-weight: 500;
+  text-shadow: 0 1px 3px rgba(35, 31, 32, 0.5);
 }
 
 .notice {
   margin: 0;
-  padding: 0 16px 10px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--border);
+  background: var(--bg);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -159,16 +444,18 @@ textarea {
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 24px 28px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  background: var(--surface);
 }
 
 .message {
-  max-width: 90%;
+  max-width: 85%;
   padding: 10px 14px;
   border-radius: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -192,25 +479,45 @@ textarea {
   margin-top: 4px;
 }
 
+/* Your messages: brand light blue with brand black text (9.1:1). */
 .message.user {
   align-self: flex-end;
-  background: var(--accent);
-  color: var(--accent-text);
+  /* border-bottom-right-radius: 2px; */
+  background: var(--light-blue);
+  color: var(--black);
   white-space: pre-wrap;
 }
 
+/* Assistant messages sit next to a small avatar. */
 .message.bot {
+  position: relative;
   align-self: flex-start;
-  background: var(--surface);
+  margin-left: 36px;
+  /* border-top-left-radius: 2px; */
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgba(35, 31, 32, 0.12);
+}
+
+.message.bot::before {
+  content: "";
+  position: absolute;
+  left: -36px;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--light-blue) var(--avatar) center / cover no-repeat;
 }
 
 .message.error {
+  border-left: 4px solid var(--error-text);
   background: var(--error-bg);
   color: var(--error-text);
 }
 
 .answer a {
-  color: var(--accent);
+  color: var(--accent); /* #D51C28 on white: 5.2:1 */
+  font-weight: 600;
   text-decoration: underline;
 }
 
@@ -227,10 +534,10 @@ textarea {
 }
 
 .dots span {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--blue);
   animation: pulse 1.2s infinite ease-in-out;
 }
 
@@ -247,9 +554,11 @@ textarea {
   80%,
   100% {
     opacity: 0.25;
+    transform: none;
   }
   40% {
     opacity: 1;
+    transform: translateY(-3px);
   }
 }
 
@@ -258,13 +567,28 @@ textarea {
     animation: none;
     opacity: 0.6;
   }
+
+  .panel {
+    animation: none;
+  }
+
+  .launcher,
+  .start,
+  .card {
+    transition: none;
+  }
+
+  .launcher:hover,
+  .start:hover {
+    transform: none;
+  }
 }
 
 /* ---- Source cards ------------------------------------------------------------------------- */
 
 .sources {
   list-style: none;
-  margin: 10px 0 0 !important;
+  margin: 12px 0 0 !important;
   padding: 0 !important;
   display: flex;
   flex-direction: column;
@@ -274,10 +598,11 @@ textarea {
 .source-card {
   display: flex;
   flex-direction: column;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  border-left: 3px solid var(--blue);
+  border-radius: 4px;
+  background: var(--surface);
   color: var(--text);
   font-size: 13px;
   line-height: 1.35;
@@ -285,12 +610,12 @@ textarea {
 }
 
 .source-card:hover {
-  border-color: var(--accent);
+  border-color: var(--blue);
 }
 
 .source-title {
-  color: var(--accent);
-  font-weight: 600;
+  color: var(--accent); /* #D51C28 on #f4f6f8: 4.8:1 */
+  font-weight: 700;
   text-decoration: underline;
 }
 
@@ -302,25 +627,45 @@ textarea {
 /* ---- Question form ------------------------------------------------------------------------ */
 
 .form {
-  padding: 10px 16px 14px;
+  padding: 14px 24px 16px;
   border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* The question box: a bordered box holding the text area, the character count, and the send
+   arrow. The whole box shows the focus ring while you type. */
+.composer {
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.composer:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.composer:has(textarea[aria-invalid="true"]) {
+  border-color: var(--error-text);
 }
 
 textarea {
   display: block;
   width: 100%;
-  min-height: 48px;
+  min-height: 44px;
   max-height: 140px;
-  padding: 10px 12px;
-  border: 1px solid var(--muted);
+  padding: 10px 12px 2px;
+  border: 0;
   border-radius: 8px;
-  background: var(--bg);
-  resize: vertical;
+  background: transparent;
+  resize: none;
   font-size: 16px; /* 16px or more stops iPhones zooming in on focus */
 }
 
-textarea[aria-invalid="true"] {
-  border-color: var(--error-text);
+/* The ring is on .composer instead, so it isn't drawn twice. */
+textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .form-error {
@@ -334,12 +679,12 @@ textarea[aria-invalid="true"] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 8px;
+  padding: 0 8px 8px 12px;
 }
 
 .count {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .count.over {
@@ -347,37 +692,112 @@ textarea[aria-invalid="true"] {
   font-weight: 600;
 }
 
+/* Round send arrow in the box's bottom-right corner. Labeled "Send" for screen readers. */
 .send {
-  min-height: 44px;
-  padding: 8px 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 0;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 600;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #ffffff;
   cursor: pointer;
 }
 
+.send:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+
+/* Gray until something is typed (inactive controls don't need to meet contrast rules). */
 .send:disabled {
+  background: #b9bec6;
+  cursor: not-allowed;
+}
+
+/* While an answer is loading. */
+.send.busy {
+  background: var(--blue);
   opacity: 0.6;
   cursor: progress;
+}
+
+/* ---- Full screen: center the content like a page ------------------------------------------ */
+
+.fullscreen .hero {
+  padding: 28px 28px 64px;
+  text-align: center;
+}
+
+.fullscreen .hero-top {
+  position: relative;
+  justify-content: center;
+}
+
+.fullscreen .hero .window-buttons {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+.fullscreen .avatar-hero {
+  width: 76px;
+  height: 76px;
+}
+
+.fullscreen .hero-title {
+  font-size: 28px;
+}
+
+.fullscreen .home-body {
+  max-width: 640px;
+  margin-top: -24px;
+}
+
+/* Wide screens: a centered 800px column. Each message takes a little under half of it, with
+   more space between messages. */
+.fullscreen .messages,
+.fullscreen .notice,
+.fullscreen .form {
+  padding-left: max(28px, calc((100% - 800px) / 2));
+  padding-right: max(28px, calc((100% - 800px) / 2));
+}
+
+.fullscreen .messages {
+  gap: 28px;
+  padding-top: 32px;
+  padding-bottom: 32px;
+}
+
+.fullscreen .message {
+  max-width: 46%;
 }
 
 /* ---- Phones: the panel fills the screen --------------------------------------------------- */
 
 @media (max-width: 480px) {
-  .panel {
+  .panel,
+  .panel.fullscreen {
     inset: 0;
     width: auto;
     max-width: none;
     height: auto;
     max-height: none;
-    border: 0;
-    border-top: 4px solid var(--accent);
     border-radius: 0;
+  }
+
+  .expand {
+    display: none; /* already full screen */
   }
 
   .open .launcher {
     display: none;
+  }
+
+  .hero-title {
+    font-size: 22px;
   }
 }

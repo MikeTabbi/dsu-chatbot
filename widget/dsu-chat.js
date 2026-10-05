@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.5.0"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
 
@@ -232,44 +232,158 @@
   // The widget: launcher button, chat panel, and the call to POST /chat.
   // ---------------------------------------------------------------------------------------------
 
+  const STORAGE_KEY = "dsu-chat:last-conversation";
+  const MAX_SAVED_MESSAGES = 40;
+
+  // Icons used in SHELL. Static markup, no outside text.
+  const ICON = {
+    close:
+      '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z"/></svg>',
+    expand:
+      '<svg class="icon-expand" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z"/></svg>' +
+      '<svg class="icon-shrink" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M8 4h2v6H4V8h4zm6 0h2v4h4v2h-6zM4 14h6v6H8v-4H4zm10 0h6v2h-4v4h-2z"/></svg>',
+    chat:
+      '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>',
+    chevron:
+      '<svg class="chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M9.3 5.3 10.7 3.9 18.8 12l-8.1 8.1-1.4-1.4 6.7-6.7z"/></svg>',
+    back:
+      '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M14.7 5.3 13.3 3.9 5.2 12l8.1 8.1 1.4-1.4L8 12z"/></svg>',
+  };
+
+  const WINDOW_BUTTONS = `
+    <div class="window-buttons">
+      <button class="icon-button expand" type="button" aria-pressed="false"
+        aria-label="Full screen">${ICON.expand}</button>
+      <button class="icon-button close" type="button" aria-label="Close chat">${ICON.close}</button>
+    </div>`;
+
   // Static markup only. Never put answer, source, or user text in here.
   const SHELL = `
     <div class="widget">
       <button class="launcher" type="button" aria-expanded="false" aria-controls="panel">
-        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22">
-          <path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>
-        </svg>
+        <span class="avatar avatar-launcher" aria-hidden="true"></span>
         <span class="launcher-label"></span>
       </button>
-      <section class="panel" id="panel" role="dialog" aria-labelledby="title" hidden>
-        <header class="header">
-          <h2 class="title" id="title"></h2>
-          <button class="close" type="button" aria-label="Close chat">
-            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20">
-              <path fill="currentColor" d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z"/>
-            </svg>
-          </button>
-        </header>
-        <p class="notice">
-          I'm an AI assistant that answers from DSU's website, and I can make mistakes. Don't
-          share personal information. For official decisions, contact the DSU office that
-          handles your question.
-        </p>
-        <div class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
-        <form class="form" novalidate>
-          <label class="sr-only" for="question">Your question</label>
-          <textarea id="question" rows="2" placeholder="Ask a question about DSU"
-            aria-describedby="count form-error"></textarea>
-          <p class="form-error" id="form-error" role="alert"></p>
-          <div class="form-row">
-            <span class="count" id="count"></span>
-            <button class="send" type="submit">Send</button>
+      <section class="panel" id="panel" role="dialog" hidden>
+        <div class="view home">
+          <header class="hero">
+            <div class="hero-top">
+              <span class="avatar avatar-hero" aria-hidden="true"></span>
+              ${WINDOW_BUTTONS}
+            </div>
+            <h2 class="hero-title">Welcome to Delaware State University!</h2>
+            <p class="hero-subtitle">How can we help you today?</p>
+          </header>
+          <div class="home-body">
+            <button class="start" type="button">${ICON.chat}<span>Start New Conversation</span></button>
+            <button class="card resume" type="button">
+              <span class="card-text">
+                <span class="card-title">Resume Last Conversation</span>
+                <span class="card-preview">
+                  <span class="avatar avatar-small" aria-hidden="true"></span>
+                  <span class="card-preview-text">
+                    <span class="card-snippet"></span>
+                    <span class="card-meta"></span>
+                  </span>
+                </span>
+              </span>
+              ${ICON.chevron}
+            </button>
+            <button class="card past" type="button" aria-disabled="true"
+              aria-describedby="past-soon">
+              <span class="card-text">
+                <span class="card-title">See Past Conversations
+                  <span class="badge" id="past-soon">Coming soon</span></span>
+                <span class="card-meta past-meta"></span>
+              </span>
+              ${ICON.chevron}
+            </button>
           </div>
-        </form>
+        </div>
+        <div class="view chat" hidden>
+          <header class="header">
+            <button class="icon-button back" type="button" aria-label="Back to home">${ICON.back}</button>
+            <span class="avatar avatar-header" aria-hidden="true"></span>
+            <h2 class="title"></h2>
+            ${WINDOW_BUTTONS}
+          </header>
+          <p class="notice">
+            I'm an AI assistant that answers from DSU's website, and I can make mistakes. Don't
+            share personal information. For official decisions, contact the DSU office that
+            handles your question.
+          </p>
+          <div class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+          <form class="form" novalidate>
+            <label class="sr-only" for="question">Your question</label>
+            <div class="composer">
+              <textarea id="question" rows="2" placeholder="Ask a question about DSU"
+                aria-describedby="count form-error"></textarea>
+              <div class="form-row">
+                <span class="count" id="count"></span>
+                <button class="send" type="submit">
+                  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M11 20V7.8l-5.6 5.6L4 12l8-8 8 8-1.4 1.4L13 7.8V20z"/></svg>
+                  <span class="sr-only">Send</span>
+                </button>
+              </div>
+            </div>
+            <p class="form-error" id="form-error" role="alert"></p>
+          </form>
+        </div>
       </section>
     </div>`;
 
+  /** "just now", "5m ago", "3h ago", "2d ago". */
+  function timeAgo(ms) {
+    const minutes = Math.floor((Date.now() - ms) / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
+
+  /** The saved conversation, or null. Storage can be blocked or full, so never let it throw. */
+  function loadConversation() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+      return saved && Array.isArray(saved.messages) && saved.messages.length ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveConversation(conversation) {
+    try {
+      if (conversation) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversation));
+      else window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // private browsing or storage full: the conversation just isn't kept after a reload
+    }
+  }
+
+  /**
+   * Roboto, from a fonts/ folder next to dsu-chat.css (see README, "Font"). Fonts registered with
+   * document.fonts are usable inside the Shadow DOM; the unusual family name keeps the host page
+   * from picking them up. If the files aren't there, the CSS falls back to Arial.
+   */
+  function loadFonts(baseUrl) {
+    if (typeof FontFace !== "function" || !document.fonts) return;
+    const faces = [
+      ["400", "Roboto", "Roboto-Regular"],
+      ["500", "Roboto Medium", "Roboto-Medium"],
+      ["700", "Roboto Bold", "Roboto-Bold"],
+    ];
+    for (const [weight, localName, file] of faces) {
+      const url = new URL(`fonts/${file}.ttf`, baseUrl).href;
+      new FontFace("DSU Chat Roboto", `local("${localName}"), url("${url}")`, { weight })
+        .load()
+        .then((face) => document.fonts.add(face))
+        .catch(() => {}); // not installed and not hosted: use the fallback fonts
+    }
+  }
+
   function mount(options) {
+    loadFonts(options.cssUrl);
     const host = document.createElement("div");
     host.id = HOST_ID;
     host.style.display = "none"; // shown once the stylesheet loads, so it never flashes unstyled
@@ -288,9 +402,13 @@
     document.body.appendChild(host);
 
     const $ = (selector) => root.querySelector(selector);
+    const $$ = (selector) => Array.from(root.querySelectorAll(selector));
     const widget = $(".widget");
     const launcher = $(".launcher");
     const panel = $(".panel");
+    const home = $(".home");
+    const chat = $(".chat");
+    const resume = $(".resume");
     const messages = $(".messages");
     const form = $(".form");
     const input = $("#question");
@@ -298,17 +416,22 @@
     const formError = $("#form-error");
     const send = $(".send");
     let busy = false;
+    // The conversation on screen: { updated, messages: [{ role: "user", text } | { role: "bot", data }] }
+    let conversation = loadConversation();
+    let shown = false; // has `conversation` been drawn into .messages yet?
 
     $(".launcher-label").textContent = options.title;
     $(".title").textContent = options.title;
-    addBotText(MESSAGES.welcome);
+    panel.setAttribute("aria-label", options.title);
     updateCount();
+    updateHome();
 
     function open() {
       panel.hidden = false;
       widget.classList.add("open");
       launcher.setAttribute("aria-expanded", "true");
-      input.focus();
+      updateHome();
+      (chat.hidden ? $(".start") : input).focus();
     }
 
     function close() {
@@ -318,8 +441,90 @@
       launcher.focus();
     }
 
+    function showHome() {
+      updateHome();
+      chat.hidden = true;
+      home.hidden = false;
+      $(".start").focus();
+    }
+
+    function showChat() {
+      home.hidden = true;
+      chat.hidden = false;
+      input.focus();
+    }
+
+    function startNew() {
+      messages.textContent = "";
+      conversation = null;
+      shown = true;
+      saveConversation(null);
+      addBotText(MESSAGES.welcome);
+      showChat();
+    }
+
+    function resumeLast() {
+      if (!conversation) return;
+      if (!shown) {
+        messages.textContent = "";
+        addBotText(MESSAGES.welcome);
+        for (const m of conversation.messages) {
+          if (m.role === "user") addMessage("user", (el) => (el.textContent = String(m.text)));
+          else if (m.data && typeof m.data.answer === "string") addAnswer(m.data);
+        }
+        shown = true;
+      }
+      showChat();
+      const last = messages.lastElementChild;
+      if (last) messages.scrollTop = last.offsetTop - messages.offsetTop - 16;
+    }
+
+    function remember(entry) {
+      conversation = conversation || { messages: [] };
+      conversation.messages.push(entry);
+      conversation.messages = conversation.messages.slice(-MAX_SAVED_MESSAGES);
+      conversation.updated = Date.now();
+      saveConversation(conversation);
+    }
+
+    /** Fills the Resume and Past cards. Text only, through textContent. */
+    function updateHome() {
+      const lastBot = conversation
+        ? [...conversation.messages].reverse().find((m) => m.role === "bot")
+        : null;
+      let snippet = "";
+      if (lastBot && typeof lastBot.data?.answer === "string") {
+        const scratch = document.createElement("div");
+        scratch.appendChild(renderMarkdown(lastBot.data.answer, document));
+        snippet = scratch.textContent.replace(/\s+/g, " ").trim();
+      } else if (conversation) {
+        snippet = String(conversation.messages[conversation.messages.length - 1].text || "");
+      }
+      resume.setAttribute("aria-disabled", String(!conversation));
+      $(".card-snippet").textContent = conversation ? snippet : "You don't have a conversation yet.";
+      $(".card-meta").textContent = conversation
+        ? `${options.title} · ${timeAgo(conversation.updated)}`
+        : "Start one to see it here.";
+      $(".past-meta").textContent = conversation
+        ? `Last conversation ended ${timeAgo(conversation.updated)}`
+        : "No past conversations yet";
+    }
+
+    function toggleFullscreen() {
+      const on = panel.classList.toggle("fullscreen");
+      widget.classList.toggle("fullscreen", on);
+      for (const button of $$(".expand")) {
+        button.setAttribute("aria-pressed", String(on));
+        button.setAttribute("aria-label", on ? "Exit full screen" : "Full screen");
+      }
+    }
+
     launcher.addEventListener("click", () => (panel.hidden ? open() : close()));
-    $(".close").addEventListener("click", close);
+    for (const button of $$(".close")) button.addEventListener("click", close);
+    for (const button of $$(".expand")) button.addEventListener("click", toggleFullscreen);
+    $(".back").addEventListener("click", showHome);
+    $(".start").addEventListener("click", startNew);
+    resume.addEventListener("click", resumeLast);
     panel.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
@@ -344,6 +549,13 @@
       count.classList.toggle("over", tooLong);
       input.setAttribute("aria-invalid", String(tooLong));
       if (!tooLong) showFormError("");
+      updateSend();
+    }
+
+    /** The send arrow is grayed out until there's text, and while an answer is loading. */
+    function updateSend() {
+      send.disabled = busy || !input.value.trim();
+      send.classList.toggle("busy", busy);
     }
 
     function showFormError(text) {
@@ -367,6 +579,14 @@
         return;
       }
 
+      if (!shown) {
+        // Asked without Start or Resume (for example from a script): begin a new conversation.
+        messages.textContent = "";
+        conversation = null;
+        shown = true;
+        addBotText(MESSAGES.welcome);
+        showChat();
+      }
       showFormError("");
       addMessage("user", (el) => (el.textContent = question));
       input.value = "";
@@ -390,6 +610,8 @@
         const data = await response.json().catch(() => null);
         if (response.ok && data && typeof data.answer === "string") {
           addAnswer(data);
+          remember({ role: "user", text: question });
+          remember({ role: "bot", data: { answer: data.answer, sources: data.sources } });
         } else if (response.status === 422 && typeof data?.detail === "string") {
           failed(data.detail, question); // the API's own message, e.g. question too long
         } else if (response.status === 503) {
@@ -407,7 +629,7 @@
 
     function setBusy(value) {
       busy = value;
-      send.disabled = value;
+      updateSend();
     }
 
     function failed(text, question) {

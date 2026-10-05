@@ -1,7 +1,12 @@
 # Chat widget
 
 The chat window DSU adds to its website. A red **Ask DSU** button sits in the bottom-right corner
-and opens a chat panel (full screen on phones). Students type a question. The widget sends it to
+and opens a chat panel (full screen on phones). The panel opens on a home screen: the assistant's
+avatar, "Welcome to Delaware State University! How can we help you today?" over an aerial campus
+photo with a red gradient,
+and **Start New Conversation** (blue), **Resume Last Conversation**, and **See Past Conversations**
+(not built yet, marked "Coming soon"). Buttons in the top-right corner make the panel full screen
+and close it. Students type a question. The widget sends it to
 the backend's `POST /chat` and shows the answer with its sources as small cards (title, link, and
 "Last updated" date).
 
@@ -11,6 +16,9 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 |---|---|
 | `dsu-chat.js` | Everything: the button, the panel, the call to `/chat`, Markdown rendering |
 | `dsu-chat.css` | All styles, including the branding colors |
+| `dsu-avatar.svg` | The assistant's illustrated avatar (launcher, header, next to answers) |
+| `dsu-campus.jpg` | Aerial campus photo behind the welcome text (see "Header photo") |
+| `fonts/` | Roboto font files you add (see "Font"). Optional: without them the widget uses Arial |
 | `demo.html` | A test page that loads the widget like dsu.edu would |
 | `dsu-chat-mock.js` | Saved `/chat` replies for mock mode (demo page only, never embedded) |
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
@@ -18,7 +26,8 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 
 ## Embedding it on a site (Drupal)
 
-Host `dsu-chat.js` and `dsu-chat.css` in the same folder, then add one tag to the page (in Drupal,
+Host `dsu-chat.js`, `dsu-chat.css`, `dsu-avatar.svg`, `dsu-campus.jpg`, and the `fonts/` folder
+together, then add one tag to the page (in Drupal,
 for example in a custom block or the theme's footer):
 
 ```html
@@ -41,13 +50,33 @@ the new styles. When you change either file, bump `VERSION` and the `?v=` in the
 
 ## Branding
 
+Colors come from the [DSU Branding Tool Kit (August 2023)](https://www.desu.edu/sites/flagship/files/document/31/dsu_style_guide.pdf):
+
+| Brand color | Used for | Contrast |
+|---|---|---|
+| Red, Pantone 485 C, `#EE3124` | Header gradient over the photo, avatar shirt | Shaded with brand black (30%): white text 5.6:1 behind the welcome text, 4.7:1 at the right edge, even over a white spot in the photo |
+| Darker red `#D51C28` (athletics red, not in the tool kit) | Ask DSU launcher, links, source titles | White 5.22:1, 4.8:1 on the light gray |
+| Dark blue `#00549A` (chosen by the team, not in the tool kit) | Start New Conversation button, send arrow, card and source-card edges, chevrons, loading dots | White 7.9:1 |
+| Blue, Pantone 299 C, `#009DDC` | Your messages, "Coming soon" badge, avatar background | Brand black text 5.32:1 |
+| Black, Process Black, `#231F20` | Main text, focus ring, header shading | 16.3:1 on white |
+
+**Font:** Roboto (the tool kit names Myriad Pro for print, which is a licensed Adobe font). The
+widget doesn't load anything from Google. It uses Roboto if the visitor has it installed, or from
+a `fonts/` folder next to `dsu-chat.css`:
+
+1. Download Roboto from https://fonts.google.com/specimen/Roboto ("Get font", then "Download all").
+2. From the zip's `static/` folder, copy `Roboto-Regular.ttf`, `Roboto-Medium.ttf`, and
+   `Roboto-Bold.ttf` into `widget/fonts/`.
+
+Without the files the widget falls back to Helvetica Neue or Arial, and the browser console shows
+404s for the three font files. Roboto is under the SIL Open Font License, so hosting it is fine.
+
 All colors and the font are CSS variables. Set them on the host page, for example:
 
 ```css
 :root {
-  --dsu-chat-accent: #a6192e;      /* button, your messages, links */
-  --dsu-chat-accent-text: #ffffff; /* text on the accent color */
-  --dsu-chat-font: "Open Sans", Arial, sans-serif;
+  --dsu-chat-accent: #d51c28;      /* launcher, Send, links */
+  --dsu-chat-font: "Myriad Pro", Arial, sans-serif;
 }
 ```
 
@@ -57,8 +86,25 @@ least 4.5:1 against its background (check with https://webaim.org/resources/cont
 The widget draws itself inside a Shadow DOM, so the site's own CSS can't change it by accident.
 Only these variables cross that boundary.
 
+### Header photo
+
+`dsu-campus.jpg` is an aerial photo of campus, shown under a red gradient. To change it, replace the
+file (keep it under about 200 KB), or set it from the host page with a full URL:
+`--dsu-chat-hero-image: url("https://www.desu.edu/.../campus.jpg");`. Check the photo's usage
+rights with Marketing & Communications before going live.
+
 ## How it behaves
 
+- **Home screen:** Start New Conversation clears the chat and shows the welcome message. Resume
+  Last Conversation reopens the last chat, even after a page reload: the questions and answers
+  are kept in the browser's `localStorage` (last 40 messages, never sent anywhere). Starting a new
+  conversation deletes it. If storage is blocked, the chat still works but isn't kept. The back
+  arrow in the chat header returns to the home screen.
+- **Question box:** the character count and a round send arrow (labeled "Send" for screen
+  readers) sit inside the box. Enter also sends.
+- **Full screen:** the button next to the X fills the browser window. Messages sit in a centered
+  column, each a little under half its width. Press it
+  again to go back. Phones are always full screen, so it's hidden there.
 - **One question at a time:** each question is sent on its own. The backend doesn't get earlier
   questions or answers, so a follow-up like "how much is it?" won't know what "it" means. The
   welcome message tells students to include the details each time.
@@ -153,5 +199,6 @@ request.
 
 ## Not built yet
 
+- See Past Conversations: the card is shown but does nothing yet (it says "Coming soon").
 - Thumbs up/down feedback: needs a `/feedback` endpoint on the backend first.
 - Conversation memory (follow-up questions).
