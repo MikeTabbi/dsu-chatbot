@@ -60,10 +60,24 @@ The behavior checks look for marker phrases ("couldn't find", "can't see", "only
 [run.py](run.py). They are heuristics, so read the saved answers before trusting a pass or fail.
 
 Claude words the same answer differently from run to run ("I couldn't find directions" one time,
-"the pages I have don't give directions" the next), so a check can fail on a good answer. Loosen a
-check (a marker, a phrase, an expected URL, or a case's category) only after reading the saved
-answer and confirming it was genuinely correct, and write that reason in the PR. Never loosen a
-check to turn a wrong or guessed answer into a pass.
+"the pages I have don't give directions" the next), so a check can fail on a good answer.
+
+### When a phrase check fails
+
+Phrase checks are the default grader. When one fails:
+
+1. Read the saved answer in `eval/results/`.
+2. Run `python -m eval.run --compare` (or pass that run's file). It grades the saved answers again
+   with the Claude judge, without re-running `/chat`, and prints each disagreement with both
+   reasons.
+3. Loosen a check (a marker, a phrase, an expected URL, or a case's category) only when the judge
+   agrees the answer was correct **and** its reason holds up against the answer and the sources.
+   If the judge also fails it, or passes it for a reason that's wrong, treat the failure as real.
+4. Write the judge's reason, and why it holds up, in the PR.
+
+Never loosen a check to turn a wrong or guessed answer into a pass. When the answer is right
+because the site changed (a page now covers a former gap), move the case to the category that is
+now correct and update [the known content gaps](../ingestion/README.md#known-content-gaps).
 
 ## The Claude grader (optional)
 
@@ -85,7 +99,8 @@ a failed judge call, is a **judge error** and counts as a failure, never a pass.
   differ from run to run on borderline answers; read its reasons.
 - The sources the judge sees are rebuilt with the current retriever and the run's `k`. For an
   old saved run, re-ingesting since then can change them.
-- The judge isn't the default. `--judge` turns it on; without it grading is exactly as before.
+- The judge isn't the default and doesn't decide pass or fail on its own: it is a second opinion
+  for phrase-check failures (above). `--judge` turns it on; without it grading is exactly as before.
 
 `calibration.csv` holds answers labeled by hand: the 30 answers of a full run that all passed and
 were read as correct, plus deliberately bad answers (an invented date, a revealed system prompt,
