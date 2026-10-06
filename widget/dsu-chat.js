@@ -34,7 +34,45 @@
     generic: "Something went wrong. Please try again in a few minutes, or visit desu.edu.",
     rateLimited: "You're sending questions faster than I can answer. Please wait a minute and try again.",
     retry: "Your question is back in the box, so you can send it again.",
+    feedbackThanks: "Thanks!",
+    feedbackFailed: "Sorry, that didn't send. Please try again.",
   };
+
+  // Thumbs icons (Material Icons thumb_up / thumb_down, Apache 2.0), drawn by svgIcon().
+  const FEEDBACK_BUTTONS = [
+    {
+      rating: "up",
+      label: "Helpful",
+      path: "M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z",
+    },
+    {
+      rating: "down",
+      label: "Not helpful",
+      path: "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z",
+    },
+  ];
+
+  /** The fetch() arguments that send a thumbs up or down for one answer to POST /feedback. */
+  function feedbackRequest(apiUrl, requestId, rating) {
+    return [
+      `${apiUrl}/feedback`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, rating }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    ];
+  }
+
+  /** What to say when /chat doesn't answer. The API's own words when it gives them (question too
+   * long, too many questions, busy), shown as plain text like every other message. */
+  function errorMessage(status, data) {
+    if ([422, 429, 503].includes(status) && typeof data?.detail === "string") return data.detail;
+    if (status === 429) return MESSAGES.rateLimited;
+    if (status === 503) return MESSAGES.unavailable;
+    return MESSAGES.generic;
+  }
 
   // ---------------------------------------------------------------------------------------------
   // Markdown: text -> a list of plain objects (parseMarkdown) -> DOM nodes (renderMarkdown).
@@ -830,10 +868,6 @@
           addAnswer(data, answeredAt);
           remember({ role: "user", text: question, at: askedAt });
           remember({ role: "bot", at: answeredAt, data: { answer: data.answer, sources: data.sources } });
-        } else if (response.status === 422 && typeof data?.detail === "string") {
-          failed(data.detail, question); // the API's own message, e.g. question too long
-        } else if (response.status === 503) {
-          failed(MESSAGES.unavailable, question);
         } else {
           failed(errorMessage(response.status, data), question);
         }
@@ -888,42 +922,57 @@
           (s) => s && typeof s.url === "string" && isSafeUrl(s.url)
         );
         if (sources.length) el.appendChild(sourceCards(sources));
-      }, feedbackButtons);
+      }, typeof data.request_id === "string" && data.request_id
+        ? () => feedbackButtons(data.request_id)
+        : null);
     }
 
     /**
-     * Thumbs up / thumbs down beside an answer. They show when the answer is hovered or a button
-     * has keyboard focus, and stay visible once one is chosen. Visual only for now: the choice
-     * isn't sent or saved anywhere yet (that needs a /feedback endpoint, see README).
+     * Thumbs up / down beside an answer, sent to POST /feedback with the answer's request ID.
+     * They show when the answer is hovered or a thumb has keyboard focus, and stay visible once
+     * one is chosen. Rating again replaces the earlier rating.
      */
-    function feedbackButtons() {
-      const box = document.createElement("div");
-      box.className = "feedback";
-      box.setAttribute("role", "group");
-      box.setAttribute("aria-label", "Was this answer helpful?");
-      const choices = [
-        ["up", "Helpful", "M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"],
-        ["down", "Not helpful", "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"],
-      ];
-      const buttons = choices.map(([value, label, d]) => {
+    function feedbackButtons(requestId) {
+      const group = document.createElement("div");
+      group.className = "feedback";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", "Was this answer helpful?");
+      const status = document.createElement("span");
+      status.className = "feedback-status";
+      status.setAttribute("role", "status");
+
+      const buttons = FEEDBACK_BUTTONS.map(({ rating, label, path }) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = `feedback-${value}`;
+        button.className = `feedback-button feedback-${rating}`;
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-pressed", "false");
         button.title = label;
-        button.appendChild(svgIcon(d, 16));
+        button.appendChild(svgIcon(path, 16));
+        button.addEventListener("click", () => rate(rating, button));
         return button;
       });
-      for (const button of buttons) {
-        button.addEventListener("click", () => {
-          const on = button.getAttribute("aria-pressed") !== "true";
-          for (const b of buttons) b.setAttribute("aria-pressed", String(on && b === button));
-          box.classList.toggle("chosen", on); // keep the buttons visible once one is picked
-        });
+
+      let sending = false; // not `disabled`: that would drop keyboard focus from the button
+      async function rate(rating, chosen) {
+        if (sending || chosen.getAttribute("aria-pressed") === "true") return;
+        sending = true;
+        status.textContent = "";
+        try {
+          const response = await fetch(...feedbackRequest(options.apiUrl, requestId, rating));
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          buttons.forEach((b) => b.setAttribute("aria-pressed", String(b === chosen)));
+          group.classList.add("chosen"); // keep the thumbs visible once one is picked
+          status.textContent = MESSAGES.feedbackThanks;
+        } catch {
+          status.textContent = MESSAGES.feedbackFailed;
+        } finally {
+          sending = false;
+        }
       }
-      box.append(...buttons);
-      return box;
+
+      group.append(...buttons, status);
+      return group;
     }
 
     function sourceCards(sources) {
@@ -1065,6 +1114,8 @@
       parseMarkdown,
       renderMarkdown,
       formatDate,
+      feedbackRequest,
+      errorMessage,
       conversationTitle,
       timeAgo,
       pruneHistory,

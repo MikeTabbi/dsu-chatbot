@@ -123,11 +123,12 @@ rights with Marketing & Communications before going live.
   ago: "Just now", "5 Mins Ago", "2 Hrs Ago", "3 Days Ago" (`timeAgo()` in `dsu-chat.js`). The times update
   every minute while the panel is open. Conversations saved before version 0.7 have no time per
   message, so their messages show the conversation's last update.
-- **Thumbs up / down:** beside each answer (not the welcome or error messages). They appear when
-  the answer is hovered or a thumb has keyboard focus, and always on touch screens. Clicking one
-  turns it blue (screen readers hear "pressed"); clicking it again, or the other one, changes the
-  choice. **Visual only for now:** the choice isn't sent or saved, and resets when a saved
-  conversation is reopened.
+- **Feedback:** thumbs up and thumbs down beside each answer (not the welcome or error messages),
+  "Helpful" / "Not helpful" for screen readers. They appear when the answer is hovered or a thumb
+  has keyboard focus, and always on touch screens. Clicking one sends the answer's `request_id`
+  to the backend's `POST /feedback`; the chosen thumb turns blue (`aria-pressed="true"`) and a
+  short "Thanks!" appears. Picking the other one changes the rating. Answers reopened from Past
+  Conversations have no request ID saved, so they show no thumbs.
 - **Question box:** the character count and a round send arrow (labeled "Send" for screen
   readers) sit inside the box. Enter also sends.
 - **Full screen:** the button next to the X fills the browser window. Messages sit in a centered
@@ -243,5 +244,4 @@ request.
 ## Not built yet
 
 - A comment box with thumbs down (`/feedback` already accepts an optional `comment`).
-- Sending thumbs up/down: the buttons exist, but recording the choice needs a `/feedback` endpoint on the backend first.
 - Conversation memory (follow-up questions).
