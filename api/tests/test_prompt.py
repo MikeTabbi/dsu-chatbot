@@ -7,7 +7,9 @@ from api.app.claude_client import FakeClaudeClient
 from api.app.prompt import (
     NO_SOURCES,
     PROMPT_PATH,
+    LinkedSources,
     build_prompt,
+    linked_sources,
     load_system_prompt,
     main,
     parse_citations,
@@ -209,3 +211,25 @@ def test_cli_without_ask_prints_the_prompt_and_makes_no_call(monkeypatch, capsys
     assert "Retrieved 0 chunk(s)" in out
     assert NO_SOURCES in out
     assert fake.calls == []
+
+
+def test_linked_sources_match_source_urls_exactly():
+    urls = ["https://www.desu.edu/a", "https://www.desu.edu/b", "https://www.desu.edu/a"]
+    text = (
+        "See [A](https://www.desu.edu/a), <https://www.desu.edu/b>, and https://www.desu.edu/a."
+        " Not https://www.desu.edu/b/c or https://www.desu.edu/z, https://my.desu.edu/x."
+        " Elsewhere: https://desu.edu.example.com/a and https://example.com/a."
+    )
+    linked = linked_sources(text, urls)
+    assert linked.cited == [1, 2]  # a URL shared by sources 1 and 3 needs only the first
+    assert linked.unknown == [
+        "https://www.desu.edu/b/c",
+        "https://www.desu.edu/z",
+        "https://my.desu.edu/x",
+    ]
+
+
+def test_linked_sources_with_no_links():
+    assert linked_sources("I can only help with DSU questions.", ["https://www.desu.edu/a"]) == (
+        LinkedSources([], [])
+    )

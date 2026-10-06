@@ -24,7 +24,7 @@ from api.app.exchange_log import (
     get_exchange_log,
     now,
 )
-from api.app.prompt import build_prompt, parse_citations, prompt_version
+from api.app.prompt import build_prompt, linked_sources, parse_citations, prompt_version
 from api.app.rate_limit import DAY, MINUTE, Limit, RateLimiter, client_ip, get_rate_limiter
 from api.app.redact import redact
 from api.app.request_guard import RequestGuard
@@ -254,8 +254,16 @@ def chat(
         )
 
     answer = parse_citations(reply.text, len(chunks))
-    sources = _sources([chunks[n - 1] for n in answer.cited])
-    _log_request(request_id, start, chunks, f"answered cited={len(answer.cited)}")
+    # A page the answer links is a page it used, even if its <cited> line leaves it out (a decline
+    # that still links DSU's tuition page). A desu.edu link to no source is logged, never shown.
+    linked = linked_sources(answer.text, [c.source_url for c in chunks])
+    for url in linked.unknown:
+        log.warning(
+            "answer links a page not among its sources request_id=%s url=%s", request_id, url
+        )
+    cited = sorted(set(answer.cited) | set(linked.cited))
+    sources = _sources([chunks[n - 1] for n in cited])
+    _log_request(request_id, start, chunks, f"answered cited={len(cited)}")
     record("answered", answer.text, sources, reply)
     return ChatResponse(answer=answer.text, sources=sources, request_id=request_id)
 
