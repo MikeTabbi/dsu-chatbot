@@ -29,6 +29,11 @@ SECTION_TAG = re.compile(r"<(?=/?(?:sources|source|question|cited)\b)", re.IGNOR
 CITED = re.compile(r"<cited>(.*?)</cited>|<cited>([\d,\s]*)\Z", re.IGNORECASE | re.DOTALL)
 STRAY_CITED = re.compile(r"</?cited>", re.IGNORECASE)
 
+# Links in the answer text: bare, <angle-bracketed>, or a Markdown [label](url). Trailing sentence
+# punctuation isn't part of the URL.
+LINK = re.compile(r"https?://[^\s<>()\[\]\"']+")
+LINK_TRAILING = ".,;:!?*_"
+
 
 @dataclass
 class Prompt:
@@ -116,6 +121,42 @@ def parse_citations(answer: str, source_count: int) -> CitedAnswer:
                 log.warning("ignoring citation %r; %d source(s) were given", token, source_count)
     text = STRAY_CITED.sub("", CITED.sub("", answer)).strip()
     return CitedAnswer(text, sorted(cited))
+
+
+@dataclass
+class LinkedSources:
+    cited: list[int]  # source ids (1-based) whose URL the answer links exactly
+    unknown: list[str]  # desu.edu links in the answer that are in no source's URL or text
+
+
+def linked_sources(text: str, sources: list[Chunk]) -> LinkedSources:
+    """The sources an answer links in its text, even when its <cited> line leaves them out.
+    A link counts only if it is exactly a source's URL; for a URL several sources share, the first
+    (best-matching) one is enough. A link copied from a source's text (a PDF or sub-page the page
+    links to) is allowed but not cited. A desu.edu link found in neither is returned as unknown:
+    Claude may have made it up."""
+    urls = [c.source_url for c in sources]
+    in_text = {_link(m) for c in sources for m in LINK.findall(c.text)}
+    cited: set[int] = set()
+    unknown: list[str] = []
+    for match in LINK.finditer(text):
+        url = _link(match.group())
+        if url in urls:
+            cited.add(urls.index(url) + 1)
+        elif url in in_text:
+            continue
+        elif _host(url) == "desu.edu" or _host(url).endswith(".desu.edu"):
+            if url not in unknown:
+                unknown.append(url)
+    return LinkedSources(sorted(cited), unknown)
+
+
+def _link(url: str) -> str:
+    return url.rstrip(LINK_TRAILING)
+
+
+def _host(url: str) -> str:
+    return url.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
 
 
 def main(argv: list[str] | None = None) -> None:

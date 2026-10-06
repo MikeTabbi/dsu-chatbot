@@ -14,7 +14,7 @@ After your answer, add one last line that lists the id numbers of the sources yo
 <cited>1, 3</cited>
 
 - List every source whose facts or links appear in your answer, and no others. A source you read but didn't use stays off the list.
-- If your answer uses no source (for example you couldn't find it, the question is about the student's own records and you link no page, or it isn't about DSU), write `<cited></cited>`.
+- If your answer uses no source (for example you couldn't find it, the question is about the student's own records and you link no page, or you decline it and share no DSU facts), write `<cited></cited>`.
 - Always include this line, exactly once, at the very end. The student never sees it, so don't mention it.
 
 ## When the sources don't answer the question
