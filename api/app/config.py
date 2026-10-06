@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     claude_model: str = "claude-opus-5"  # placeholder until the model is chosen in #19
     claude_max_output_tokens: int = 4096
     claude_timeout_seconds: float = 30.0
+    judge_model: str = ""  # the eval's Claude grader (eval/judge.py); blank: CLAUDE_MODEL
     search_endpoint: str = ""
     search_api_key: str = ""
     search_index_name: str = "dsu-content"
