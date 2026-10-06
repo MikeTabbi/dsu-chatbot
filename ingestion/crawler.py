@@ -33,17 +33,25 @@ class FetchResult:
     url: str
     final_url: str
     status: int | None
-    fetched_at: str
+    fetched_at: str  # when the saved body was downloaded
     topic: str
     content_type: str | None = None
     encoding: str | None = None
     redirects: list[str] = field(default_factory=list)
     html_file: str | None = None
+    checked_at: str | None = None  # last 200 or 304 from the server; later than fetched_at on a 304
+    etag: str | None = None
+    last_modified: str | None = None
     error: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.error is None
+
+    @property
+    def not_modified(self) -> bool:
+        """The server answered 304: the saved copy is still current."""
+        return self.ok and self.status == 304
 
 
 class Crawler:
@@ -75,8 +83,10 @@ class Crawler:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         results = []
         for source in sources:
-            result = self.fetch(source)
-            if result.ok:
+            result = self.fetch(source, self.load_meta(source.url))
+            if result.not_modified:
+                log.info("not modified %s", source.url)
+            elif result.ok:
                 log.info("saved %s -> %s", source.url, result.html_file)
             else:
                 log.warning("skipped %s: %s", source.url, result.error)
@@ -84,7 +94,19 @@ class Crawler:
         self._write_manifest(results)
         return results
 
-    def fetch(self, source: Source) -> FetchResult:
+    def load_meta(self, url: str) -> dict | None:
+        """The metadata saved by the last successful fetch of url, or None if there is none."""
+        path = self.output_dir / f"{_file_stem(url)}.json"
+        try:
+            return json.loads(path.read_text())
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as e:
+            log.warning("ignoring unreadable %s: %s", path, e)
+            return None
+
+    def fetch(self, source: Source, previous: dict | None = None) -> FetchResult:
+        """Fetch one source. Given the metadata of the last fetch, asks only for a newer copy."""
         result = FetchResult(
             url=source.url, final_url=source.url, status=None, fetched_at="", topic=source.topic
         )
@@ -94,8 +116,8 @@ class Crawler:
                 result.error = error
                 return result
 
-            response, error = self._get(url)
-            result.fetched_at = _now()
+            response, error = self._get(url, headers=self._conditional_headers(url, previous))
+            result.fetched_at = result.checked_at = _now()
             if response is None:
                 result.error = error
                 return result
@@ -107,17 +129,39 @@ class Crawler:
                 result.final_url = url
                 log.info("redirect %s -> %s", response.url, url)
                 continue
+            if response.status_code == 304 and previous:
+                self._keep(result, previous, response)
+                return result
             if response.status_code != 200:
                 result.error = f"HTTP {response.status_code}"
                 return result
 
             result.content_type = response.headers.get("content-type")
             result.encoding = response.encoding
+            result.etag = response.headers.get("etag")
+            result.last_modified = response.headers.get("last-modified")
             self._save(result, response.content)
             return result
 
         result.error = f"more than {MAX_REDIRECTS} redirects"
         return result
+
+    def _conditional_headers(self, url: str, previous: dict | None) -> dict[str, str]:
+        """If-None-Match / If-Modified-Since for the URL the saved copy came from.
+
+        desu.edu (Drupal 7's page cache) answers 304 only when both match exactly what it sent,
+        so the saved values are echoed back unchanged.
+        """
+        if not previous or previous.get("final_url") != url or not previous.get("html_file"):
+            return {}
+        if not (self.output_dir / previous["html_file"]).exists():
+            return {}
+        headers = {}
+        if previous.get("etag"):
+            headers["If-None-Match"] = previous["etag"]
+        if previous.get("last_modified"):
+            headers["If-Modified-Since"] = previous["last_modified"]
+        return headers
 
     def _check_allowed(self, url: str) -> str | None:
         parsed = urlparse(url)
@@ -151,17 +195,18 @@ class Crawler:
         return robots
 
     def _get(
-        self, url: str, follow_redirects: bool = False
+        self, url: str, follow_redirects: bool = False, headers: dict[str, str] | None = None
     ) -> tuple[httpx.Response | None, str | None]:
         """GET a URL, retrying timeouts, network errors, and 5xx responses.
 
         Page redirects are not followed here so fetch() can check each hop against robots.txt.
+        Every attempt waits its turn, including ones that end in a 304.
         """
         error = None
         for attempt in range(self.retries + 1):
             self._wait_turn(url)
             try:
-                response = self.client.get(url, follow_redirects=follow_redirects)
+                response = self.client.get(url, headers=headers, follow_redirects=follow_redirects)
             except httpx.TimeoutException as e:
                 error = f"timeout: {e!r}"
             except httpx.HTTPError as e:
@@ -189,12 +234,27 @@ class Crawler:
 
     def _save(self, result: FetchResult, body: bytes) -> None:
         """Write the raw body to <stem>.html and its metadata to <stem>.json."""
-        stem = _file_stem(result.url)
-        result.html_file = f"{stem}.html"
+        result.html_file = f"{_file_stem(result.url)}.html"
         (self.output_dir / result.html_file).write_bytes(body)
+        self._write_meta(result)
+
+    def _keep(self, result: FetchResult, previous: dict, response: httpx.Response) -> None:
+        """After a 304, keep the saved body and its metadata, and record when it was checked."""
+        result.fetched_at = previous.get("fetched_at") or result.fetched_at
+        result.content_type = previous.get("content_type")
+        result.encoding = previous.get("encoding")
+        result.html_file = previous["html_file"]
+        result.etag = response.headers.get("etag") or previous.get("etag")
+        result.last_modified = response.headers.get("last-modified") or previous.get(
+            "last_modified"
+        )
+        self._write_meta(result)
+
+    def _write_meta(self, result: FetchResult) -> None:
         meta = asdict(result)
         del meta["error"]
-        (self.output_dir / f"{stem}.json").write_text(json.dumps(meta, indent=2) + "\n")
+        path = self.output_dir / f"{_file_stem(result.url)}.json"
+        path.write_text(json.dumps(meta, indent=2) + "\n")
 
     def _write_manifest(self, results: list[FetchResult]) -> None:
         manifest = {
@@ -235,8 +295,9 @@ def main(argv: list[str] | None = None) -> None:
 
     sources = [s for s in load_sources() if args.topic in (None, s.topic)][: args.limit]
     results = Crawler(args.out, delay=args.delay).crawl(sources)
-    saved = sum(r.ok for r in results)
-    print(f"Saved {saved}/{len(results)} pages to {args.out}")
+    saved = sum(r.ok and not r.not_modified for r in results)
+    kept = sum(r.not_modified for r in results)
+    print(f"Saved {saved}/{len(results)} pages to {args.out} ({kept} not modified)")
 
 
 if __name__ == "__main__":

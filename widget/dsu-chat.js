@@ -32,6 +32,7 @@
     network:
       "I couldn't reach the DSU assistant. Check your internet connection and try again.",
     generic: "Something went wrong. Please try again in a few minutes, or visit desu.edu.",
+    rateLimited: "You're sending questions faster than I can answer. Please wait a minute and try again.",
     retry: "Your question is back in the box, so you can send it again.",
   };
 
@@ -834,7 +835,7 @@
         } else if (response.status === 503) {
           failed(MESSAGES.unavailable, question);
         } else {
-          failed(MESSAGES.generic, question);
+          failed(errorMessage(response.status, data), question);
         }
       } catch {
         failed(MESSAGES.network, question); // offline, CORS blocked, or timed out

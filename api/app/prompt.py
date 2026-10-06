@@ -2,6 +2,7 @@
 
 import argparse
 import functools
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -48,6 +49,12 @@ def load_system_prompt(path: Path = PROMPT_PATH) -> str:
     if not text:
         raise ValueError(f"System prompt {path} is empty")
     return text
+
+
+@functools.cache
+def prompt_version(path: Path = PROMPT_PATH) -> str:
+    """A short hash of prompts/system.md, logged with each exchange to show which rules answered."""
+    return hashlib.sha256(load_system_prompt(path).encode("utf-8")).hexdigest()[:12]
 
 
 def build_prompt(question: str, chunks: list[Chunk], today: date | None = None) -> Prompt:

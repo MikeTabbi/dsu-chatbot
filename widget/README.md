@@ -13,7 +13,7 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 
 | File | What it does |
 |---|---|
-| `dsu-chat.js` | Everything: the button, the panel, the call to `/chat`, Markdown rendering |
+| `dsu-chat.js` | Everything: the button, the panel, the calls to `/chat` and `/feedback`, Markdown rendering |
 | `dsu-chat.css` | All styles, including the branding colors |
 | `dsu-avatar.jpg` | The assistant's avatar (launcher, home screen, headers). 256×256, square; the widget crops it to a circle |
 | `dsu-avatar-face.jpg` | Close-up of her face for the small spots: next to answers, the Resume card, Past Conversations rows |
@@ -22,7 +22,7 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 | `demo.html` | A test page that loads the widget like dsu.edu would |
 | `dsu-chat-mock.js` | Saved `/chat` replies for mock mode (demo page only, never embedded) |
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
-| `tests/mock.test.js` | Checks that mock mode never makes a network request |
+| `tests/mock.test.js` | Checks that mock mode, thumbs up/down included, never makes a network request |
 | `tests/history.test.js` | Checks saved conversations: limits, expiry, moving the old save, blocked storage |
 
 ## Embedding it on a site (Drupal)
@@ -32,7 +32,7 @@ together, then add one tag to the page (in Drupal,
 for example in a custom block or the theme's footer):
 
 ```html
-<script src="https://YOUR-HOST/widget/dsu-chat.js?v=0.1.0"
+<script src="https://YOUR-HOST/widget/dsu-chat.js?v=0.1.1"
         data-api-url="https://YOUR-API-HOST" defer></script>
 ```
 
@@ -142,7 +142,8 @@ rights with Marketing & Communications before going live.
   mistakes, not to share personal information, and to contact the office for official decisions.
 - **Errors:** a too-long or empty question shows a message under the box without calling the
   API. If the API is unavailable (503), the network fails, or the request takes over 60 seconds,
-  the widget says so in plain words and puts the question back in the box to send again.
+  the widget says so in plain words and puts the question back in the box to send again. When the
+  API says to slow down (429) or that it's busy, the widget shows the API's own message.
 - **Accessibility:** everything works with the keyboard (Tab, Enter to send, Shift+Enter for a
   new line, Escape to close). Focus is always visible. Buttons and the question box have labels,
   new answers are read out by screen readers (the conversation is an `aria-live` region), and
@@ -218,6 +219,7 @@ word in quotes does the same:
 | Personal-data redirect, no sources | "personal" |
 | Off-topic decline | "off topic" |
 | Loading dots for 5 seconds, then the short answer | "slow" |
+| Too many questions (429), the API's "please wait" message | "rate limit" |
 | Unavailable (503) | "503" |
 | Network error | "network" |
 | Question too long, as the API reports it | "too long" |
@@ -225,7 +227,8 @@ word in quotes does the same:
 
 The replies are real `/chat` answers saved in [dsu-chat-mock.js](dsu-chat-mock.js). That file
 replaces `fetch` on the demo page, so nothing is sent anywhere. Only `demo.html` loads it, and it
-does nothing without `?mock=1`. `dsu-chat.js` doesn't know about it, so the embed code can't turn
+does nothing without `?mock=1`. Thumbs up/down work on every mock answer and always say "Thanks!";
+the rating is kept nowhere. `dsu-chat.js` doesn't know about it, so the embed code can't turn
 mock mode on. Don't host `dsu-chat-mock.js` with the widget.
 
 ## Tests
@@ -239,5 +242,6 @@ request.
 
 ## Not built yet
 
+- A comment box with thumbs down (`/feedback` already accepts an optional `comment`).
 - Sending thumbs up/down: the buttons exist, but recording the choice needs a `/feedback` endpoint on the backend first.
 - Conversation memory (follow-up questions).

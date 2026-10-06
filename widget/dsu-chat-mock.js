@@ -6,13 +6,16 @@
  * nothing about it. It does nothing unless the page URL has ?mock=1. When it runs, it replaces
  * window.fetch so every request gets a saved reply and nothing goes over the network.
  *
- * The answers are real /chat output from an eval run (eval/results, Claude Sonnet).
+ * The answers are real /chat output from an eval run (eval/results, Claude Sonnet). Thumbs
+ * up/down (POST /feedback) always succeed here, and the rating is kept nowhere.
  */
 (function () {
   "use strict";
 
   const UNAVAILABLE =
     "Sorry, I can't answer right now. Please try again in a few minutes, or visit desu.edu.";
+  const TOO_FAST =
+    "You're sending questions faster than I can answer. Please wait a minute and try again.";
 
   // Each state: the words that pick it (checked in this order), how long the reply takes, and
   // the reply. `reply: null` means a network error. A question with none of the words gets "short".
@@ -89,6 +92,13 @@
       },
     },
     {
+      name: "rate limited",
+      words: ["rate limit", "429"],
+      status: 429, // what the API says when one client asks too often
+      headers: { "Retry-After": "45" },
+      reply: { detail: TOO_FAST, request_id: "mock-429" },
+    },
+    {
       name: "503",
       words: ["503", "unavailable"],
       status: 503,
@@ -146,8 +156,22 @@
     }
   }
 
+  /** The saved reply to POST /feedback: the rating is accepted, and kept nowhere. */
+  function feedbackReply(init) {
+    let body = {};
+    try {
+      body = JSON.parse(init && init.body) || {};
+    } catch {}
+    const reply = { request_id: body.request_id, rating: body.rating };
+    const headers = { "Content-Type": "application/json" };
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(new Response(JSON.stringify(reply), { status: 200, headers })), 300);
+    });
+  }
+
   function mockFetch(input, init) {
     const url = String(input && input.url ? input.url : input);
+    if (/\/feedback$/.test(url)) return feedbackReply(init);
     let state = pickState(questionFrom(init));
     if (!/\/chat$/.test(url)) state = STATES.find((s) => s.name === "network"); // never go out
     const reply =
@@ -159,7 +183,7 @@
         if (reply === null) {
           reject(new TypeError("Failed to fetch (mock network error)"));
         } else {
-          const headers = { "Content-Type": "application/json" };
+          const headers = { "Content-Type": "application/json", ...state.headers };
           resolve(new Response(JSON.stringify(reply), { status, headers }));
         }
       }, state.delayMs ?? DEFAULT_DELAY_MS);

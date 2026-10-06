@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -167,6 +168,17 @@ def test_modified_time_falls_back_to_og_updated_time():
 
     assert result.modified_time == "2025-01-02T03:04:05-05:00"
     assert result.canonical_url == SITE + "/canonical"
+
+
+def test_text_hash_follows_content_not_site_chrome():
+    page = "<main><p>Move-in is August 20.</p></main><footer>{}</footer>"
+
+    a = extract(page.format("Dover"), SITE + "/page")
+    b = extract(page.format("Dover, DE"), SITE + "/page")
+    c = extract(page.replace("20", "21").format("Dover"), SITE + "/page")
+
+    assert a.text_hash == b.text_hash == hashlib.sha256(a.text.encode()).hexdigest()
+    assert c.text_hash != a.text_hash
 
 
 def test_extract_all_writes_one_file_per_crawled_page(tmp_path):

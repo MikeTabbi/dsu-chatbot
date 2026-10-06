@@ -593,6 +593,14 @@ button {
   color: var(--blue);
 }
 
+/* "Thanks!" or "Sorry, that didn't send", read out by screen readers. */
+.feedback-status {
+  align-self: center;
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .feedback {
     transition: none;
