@@ -1,4 +1,5 @@
-"""Run the eval set in eval/questions.csv: retrieval only (free), or full answers through /chat."""
+"""Run the eval set in eval/questions.csv: retrieval only (free), or full answers through /chat,
+graded by phrase checks or (with --judge) by Claude."""
 
 import argparse
 import csv
@@ -25,9 +26,12 @@ from api.app.main import (
 )
 from api.app.rate_limit import NoRateLimiter
 from api.app.retriever import Retriever
+from eval.judge import Judge, Verdict, get_judge_client
 
 EVAL_DIR = Path(__file__).resolve().parent
 CASES_PATH = EVAL_DIR / "questions.csv"
+# Answers labeled pass or fail by hand, to check the judge against (--calibrate).
+CALIBRATION_PATH = EVAL_DIR / "calibration.csv"
 RESULTS_DIR = EVAL_DIR / "results"  # gitignored
 
 # The behaviors each category's cases may expect. Most categories have one; adversarial cases
@@ -155,6 +159,7 @@ class Result:
     status: int | None = None
     answer: str = ""
     failures: list[str] = field(default_factory=list)
+    judge: dict | None = None  # with --judge: the judge's verdict ({"passed", "reason"})
 
 
 def _split(value: str) -> list[str]:
@@ -236,8 +241,10 @@ def check_retrieval(case: Case, retriever: Retriever, k: int) -> Result:
     return result
 
 
-def check_answer(case: Case, status: int, body: dict) -> Result:
-    """Grade one /chat response against the case: status, expected behavior, and phrases."""
+def check_answer(case: Case, status: int, body: dict, verdict: Verdict | None = None) -> Result:
+    """Grade one /chat response against the case. The hard rules (status, expected sources,
+    citations for figures and DSU links, must_not_contain) always apply. The behavior checks
+    (marker phrases and must_contain) apply unless a judge verdict is given, which replaces them."""
     answer = body.get("answer") or body.get("detail") or ""
     sources = [s["url"] for s in body.get("sources", [])]
     result = Result(
@@ -249,58 +256,75 @@ def check_answer(case: Case, status: int, body: dict) -> Result:
         status=status,
         answer=answer,
     )
-    failures = result.failures
+    checks: list[tuple[str, bool]] = []  # (failure, whether it's a behavior check)
+
+    def hard(failure: str) -> None:
+        checks.append((failure, False))
+
+    def behavior(failure: str) -> None:
+        checks.append((failure, True))
+
     if status != 200:
-        failures.append(f"HTTP {status}")
+        hard(f"HTTP {status}")
     text = _norm_text(answer)
 
     if case.expected_behavior == "answer_with_source":
         # The widget shows the cited sources as cards, so the answer text has no "Source:" line.
         if not sources:
-            failures.append("returns no cited sources")
+            hard("returns no cited sources")
         elif case.expected_urls and not {_norm_url(u) for u in sources} & {
             _norm_url(u) for u in case.expected_urls
         }:
-            failures.append("does not cite an expected URL")
+            hard("does not cite an expected URL")
     elif case.expected_behavior == "redirect_personal":
         if not _has_any(text, CANT_SEE_RECORDS):
-            failures.append("does not say it can't see records")
+            behavior("does not say it can't see records")
         if not _has_any(text, WHERE_TO_CHECK):
-            failures.append("does not say where to check")
+            behavior("does not say where to check")
     elif case.expected_behavior == "say_not_found":
         if not _has_any(text, NOT_FOUND):
-            failures.append("does not say it couldn't find it")
+            behavior("does not say it couldn't find it")
         if not _has_any(text, POINTS_TO_OFFICE):
-            failures.append("does not point to an office")
+            behavior("does not point to an office")
     elif case.expected_behavior == "decline":
         if not _has_any(text, DECLINES):
-            failures.append("does not decline")
+            behavior("does not decline")
     elif case.expected_behavior == "refuse":
         if not _has_any(text, REFUSES):
-            failures.append("does not refuse")
+            behavior("does not refuse")
     elif case.expected_behavior == "refer_to_office":
         if not _has_any(text, POINTS_TO_OFFICE):
-            failures.append("does not point to an office")
+            behavior("does not point to an office")
     elif case.expected_behavior == "offer_support":
         if not _has_any(text, CARES):
-            failures.append("does not respond with care")
+            behavior("does not respond with care")
         if "counseling" not in text:
-            failures.append("does not point to Counseling Services")
+            behavior("does not point to Counseling Services")
 
     if not sources:
         stated = [kind for kind, pattern in FIGURES.items() if pattern.search(answer)]
         if stated:
-            failures.append("states a " + " and a ".join(stated) + " without citing a source")
+            hard("states a " + " and a ".join(stated) + " without citing a source")
         if DSU_LINK.search(answer):
-            failures.append("links a DSU page without citing a source")
+            hard("links a DSU page without citing a source")
 
     missing = [p for p in case.must_contain if not _phrase_in(p, text)]
     forbidden = [p for p in case.must_not_contain if _phrase_in(p, text)]
     if missing:
-        failures.append("missing: " + ", ".join(repr(p) for p in missing))
+        behavior("missing: " + ", ".join(repr(p) for p in missing))
     if forbidden:
-        failures.append("contains forbidden: " + ", ".join(repr(p) for p in forbidden))
-    result.passed = not failures
+        hard("contains forbidden: " + ", ".join(repr(p) for p in forbidden))
+
+    if verdict is None:
+        result.failures = [failure for failure, _ in checks]
+    else:
+        result.failures = [failure for failure, is_behavior in checks if not is_behavior]
+        result.judge = asdict(verdict)
+        if verdict.passed is False:
+            result.failures.append(f"judge: {verdict.reason}")
+        elif verdict.passed is None:
+            result.failures.append(verdict.reason)  # "judge error: ...": never a pass
+    result.passed = not result.failures
     return result
 
 
@@ -313,9 +337,11 @@ def run_full(
     client: ClaudeClient,
     retriever: Retriever | None = None,
     k: int | None = None,
+    judge: Judge | None = None,
 ) -> list[Result]:
     """Post each question to /chat in-process (the same code path as the server), with the
-    given client, and grade the response. Overrides already set on the app are restored after."""
+    given client, and grade the response (with the judge's verdict when one is given). Overrides
+    already set on the app are restored after."""
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_chat_client] = lambda: client
     # Eval questions aren't students', so they stay out of the exchange log and its review.
@@ -334,7 +360,13 @@ def run_full(
             results = []
             for case in cases:
                 response = http.post("/chat", json={"question": case.question})
-                results.append(check_answer(case, response.status_code, response.json()))
+                body = response.json()
+                verdict = None
+                if judge is not None and response.status_code == 200:
+                    verdict = judge.grade(
+                        case.question, case.expected_behavior, case.expected_answer, body["answer"]
+                    )
+                results.append(check_answer(case, response.status_code, body, verdict))
             return results
     finally:
         app.dependency_overrides.clear()
@@ -401,6 +433,14 @@ def print_full(results: list[Result]) -> None:
     print("src: an expected URL was among the sources the answer cites")
 
 
+def _saved(result: Result) -> dict:
+    """The result as saved; the judge key only appears when a judge graded it."""
+    data = asdict(result)
+    if data["judge"] is None:
+        del data["judge"]
+    return data
+
+
 def save(results: list[Result], mode: str, meta: dict, out_dir: Path = RESULTS_DIR) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -412,14 +452,145 @@ def save(results: list[Result], mode: str, meta: dict, out_dir: Path = RESULTS_D
         **meta,
         "passed": passed,
         "graded": graded,
-        "results": [asdict(r) for r in results],
+        "results": [_saved(r) for r in results],
     }
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path
 
 
-def confirm(n: int, client_name: str, ask: Callable[[str], str] = input) -> bool:
-    print(f"Full mode will send {n} question(s) to Claude ({client_name}). This costs money.")
+@dataclass
+class Labeled:
+    """An answer labeled by hand, for checking the judge (calibration.csv)."""
+
+    question: str
+    correct: bool
+    answer: str
+    note: str = ""
+
+
+def load_calibration(path: Path | str = CALIBRATION_PATH) -> list[Labeled]:
+    rows = []
+    with open(path, newline="", encoding="utf-8") as f:
+        for line, row in enumerate(csv.DictReader(f), start=2):
+            label = row["label"].strip()
+            if label not in ("pass", "fail"):
+                raise ValueError(f"{path}:{line}: label must be 'pass' or 'fail', got {label!r}")
+            rows.append(
+                Labeled(row["question"].strip(), label == "pass", row["answer"], row["note"])
+            )
+    return rows
+
+
+def _case_for(question: str, cases: dict[str, Case], path: Path | str) -> Case:
+    if question not in cases:
+        raise ValueError(f"{path}: {question!r} is not a question in the eval set")
+    return cases[question]
+
+
+def calibrate(
+    labeled: list[Labeled], cases: list[Case], judge: Judge, path: Path | str = CALIBRATION_PATH
+) -> list[tuple[Labeled, Verdict]]:
+    """The judge's verdict on each labeled answer. Each answer's question must be an eval case,
+    which gives the expected behavior the judge checks."""
+    by_question = {c.question: c for c in cases}
+    rows = []
+    for item in labeled:
+        case = _case_for(item.question, by_question, path)
+        verdict = judge.grade(
+            case.question, case.expected_behavior, case.expected_answer, item.answer
+        )
+        rows.append((item, verdict))
+    return rows
+
+
+def print_calibration(rows: list[tuple[Labeled, Verdict]]) -> bool:
+    """Print each verdict against its label; True when the judge agrees on every answer."""
+    print(f"{'#':>2}  {'label':<5}  {'judge':<5}  {'agree':<5}  {'question':<44}  note")
+    for i, (item, verdict) in enumerate(rows, 1):
+        judged = "ERROR" if verdict.passed is None else _mark(verdict.passed)
+        agree = "yes" if verdict.passed == item.correct else "NO"
+        print(
+            f"{i:>2}  {_mark(item.correct):<5}  {judged:<5}  {agree:<5}  "
+            f"{_short(item.question, 44):<44}  {_short(item.note, 50)}"
+        )
+    misses = [(i, item, v) for i, (item, v) in enumerate(rows, 1) if v.passed != item.correct]
+    if misses:
+        print("\nMisses:")
+        for i, item, v in misses:
+            print(f"{i:>2}. labeled {_mark(item.correct)}, {item.question}: {v.reason}")
+    good = [v for item, v in rows if item.correct]
+    bad = [v for item, v in rows if not item.correct]
+    errors = sum(v.passed is None for _, v in rows)
+    print(
+        f"\nAgreement: {len(rows) - len(misses)}/{len(rows)}. "
+        f"Correct answers passed: {sum(v.passed is True for v in good)}/{len(good)}. "
+        f"Bad answers failed: {sum(v.passed is False for v in bad)}/{len(bad)}. "
+        f"Judge errors: {errors}."
+    )
+    return not misses
+
+
+@dataclass
+class Comparison:
+    rules: Result  # graded by the phrase checks
+    judged: Result  # graded by the hard rules and the judge
+
+
+def latest_full_run(out_dir: Path = RESULTS_DIR) -> Path:
+    runs = sorted(out_dir.glob("*-full.json"))
+    if not runs:
+        raise FileNotFoundError(f"no saved full runs in {out_dir}")
+    return runs[-1]
+
+
+def compare(saved: dict, cases: list[Case], judge: Judge) -> tuple[list[Comparison], list[str]]:
+    """Grade a saved full run's answers both ways. Also returns the saved questions that aren't
+    in the eval set (skipped)."""
+    by_question = {c.question: c for c in cases}
+    comparisons, skipped = [], []
+    for r in saved["results"]:
+        case = by_question.get(r["question"])
+        if case is None:
+            skipped.append(r["question"])
+            continue
+        body = {"answer": r["answer"], "sources": [{"url": u} for u in r["source_urls"]]}
+        verdict = None
+        if r["status"] == 200:
+            verdict = judge.grade(
+                case.question, case.expected_behavior, case.expected_answer, r["answer"]
+            )
+        comparisons.append(
+            Comparison(
+                check_answer(case, r["status"], body),
+                check_answer(case, r["status"], body, verdict),
+            )
+        )
+    return comparisons, skipped
+
+
+def _why(result: Result) -> str:
+    return "; ".join(result.failures) or (
+        result.judge["reason"] if result.judge else "every check passes"
+    )
+
+
+def print_compare(comparisons: list[Comparison], skipped: list[str]) -> None:
+    rules = sum(bool(c.rules.passed) for c in comparisons)
+    judged = sum(bool(c.judged.passed) for c in comparisons)
+    n = len(comparisons)
+    differ = [(i, c) for i, c in enumerate(comparisons, 1) if c.rules.passed != c.judged.passed]
+    print(f"Phrase checks: {rules}/{n} passed. Judge: {judged}/{n} passed.")
+    if skipped:
+        print(f"Skipped {len(skipped)} saved answer(s) whose question isn't in the eval set.")
+    print(f"Disagreements: {len(differ)}")
+    for i, c in differ:
+        print(f"\n{i:>2}. [{c.rules.category}] {c.rules.question}")
+        print(f"    phrase checks: {_mark(c.rules.passed)}: {_why(c.rules)}")
+        print(f"    judge:         {_mark(c.judged.passed)}: {_why(c.judged)}")
+
+
+def confirm(message: str, ask: Callable[[str], str] = input) -> bool:
+    print(f"{message} This costs money.")
     try:
         return ask("Continue? [y/N] ").strip().lower() in ("y", "yes")
     except EOFError:
@@ -435,9 +606,29 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
         "--client",
         choices=["anthropic", "fake"],
         default="anthropic",
-        help="Claude client for --full (default: anthropic)",
+        help="Claude client for --full and the judge (default: anthropic)",
     )
-    parser.add_argument("--yes", action="store_true", help="skip the confirmation for --full")
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="with --full: Claude grades behavior instead of the phrase checks (JUDGE_MODEL)",
+    )
+    parser.add_argument(
+        "--compare",
+        nargs="?",
+        const="latest",
+        metavar="RESULTS_JSON",
+        help="grade a saved full run (default: the latest) with both graders; print disagreements",
+    )
+    parser.add_argument(
+        "--calibrate",
+        nargs="?",
+        const=CALIBRATION_PATH,
+        type=Path,
+        metavar="CSV",
+        help=f"run the judge on hand-labeled answers (default: {CALIBRATION_PATH.name})",
+    )
+    parser.add_argument("--yes", action="store_true", help="skip the confirmation for Claude calls")
     parser.add_argument("-k", type=int, default=settings.chat_top_k, help="chunks per question")
     parser.add_argument(
         "--category", choices=list(BEHAVIORS_FOR_CATEGORY), help="only cases in this category"
@@ -445,13 +636,17 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
     parser.add_argument("--cases", type=Path, default=CASES_PATH, help="eval CSV")
     parser.add_argument("--out", type=Path, default=RESULTS_DIR, help="results folder")
     args = parser.parse_args(argv)
+    if args.judge and not args.full:
+        parser.error("--judge needs --full (--compare and --calibrate always use the judge)")
+    if sum(map(bool, (args.full, args.compare, args.calibrate))) > 1:
+        parser.error("choose one of --full, --compare, or --calibrate")
 
     cases = load_cases(args.cases)
     if args.category:
         cases = [c for c in cases if c.category == args.category]
     retriever = _resolve(get_chat_retriever, get_chat_retriever)
 
-    if not args.full:
+    if not (args.full or args.compare or args.calibrate):
         results = run_retrieval(cases, retriever, args.k)
         print_retrieval(results, args.k)
         path = save(results, "retrieval", {"k": args.k}, args.out)
@@ -459,15 +654,49 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
         return 0
 
     config = settings.model_copy(update={"claude_client": args.client})
+    judge, judge_model = None, None
+    if args.judge or args.compare or args.calibrate:
+        judge_client = get_judge_client(config)
+        real_judge = not isinstance(judge_client, FakeClaudeClient)
+        judge_model = (config.judge_model or config.claude_model) if real_judge else "fake"
+        saved = None
+        if args.compare:
+            saved_path = (
+                latest_full_run(args.out) if args.compare == "latest" else Path(args.compare)
+            )
+            saved = json.loads(saved_path.read_text(encoding="utf-8"))
+        # The judge sees the chunks /chat gave the bot: the same retriever and k.
+        judge = Judge(judge_client, retriever, saved.get("k", args.k) if saved else args.k)
+
+        if args.compare or args.calibrate:
+            labeled = load_calibration(args.calibrate) if args.calibrate else []
+            n = len(labeled) if args.calibrate else len(saved["results"])
+            message = f"The judge will grade {n} answer(s) with Claude ({judge_model})."
+            if real_judge and not args.yes and not confirm(message, ask):
+                print("Cancelled; no Claude calls made.")
+                return 1
+            if args.calibrate:
+                all_cases = load_cases(args.cases)
+                agreed = print_calibration(calibrate(labeled, all_cases, judge, args.calibrate))
+                return 0 if agreed else 1
+            print(f"Comparing graders on {saved_path}\n")
+            print_compare(*compare(saved, cases, judge))
+            return 0
+
     client = _resolve(get_chat_client, lambda: get_claude_client(config))
     real = not isinstance(client, FakeClaudeClient)
-    if real and not args.yes and not confirm(len(cases), config.claude_model, ask):
+    message = f"Full mode will send {len(cases)} question(s) to Claude ({config.claude_model})"
+    message += f", and judge each answer with Claude ({judge_model})." if judge else "."
+    if (real or (judge and judge_model != "fake")) and not args.yes and not confirm(message, ask):
         print("Cancelled; no Claude calls made.")
         return 1
-    results = run_full(cases, client, retriever, args.k)
+    results = run_full(cases, client, retriever, args.k, judge)
     print_full(results)
     model = config.claude_model if real else "fake"
-    path = save(results, "full", {"k": args.k, "client": args.client, "model": model}, args.out)
+    meta = {"k": args.k, "client": args.client, "model": model}
+    if judge:
+        meta["judge_model"] = judge_model
+    path = save(results, "full", meta, args.out)
     print(f"Saved {path}")
     return 0
 
