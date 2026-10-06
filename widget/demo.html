@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DSU chat widget demo</title>
+    <title>DSU chat assistant demo</title>
     <style>
       /* A stand-in for a dsu.edu page. Its CSS should not change how the widget looks. */
       body {
@@ -18,12 +18,32 @@
         color: #fff;
       }
       main {
-        max-width: 720px;
-        margin: 0 auto;
+        max-width: 560px; /* stays clear of the open chat panel on a laptop screen */
+        margin: 0 0 0 max(24px, 6vw);
         padding: 24px;
       }
       button {
         background: yellow; /* page styles like this must not reach the widget */
+      }
+      .status {
+        max-width: 520px;
+        margin-top: 24px;
+        padding: 12px 16px;
+        border-left: 6px solid #888;
+        background: #f4f4f4;
+      }
+      .status.ok {
+        border-color: #1a7f37;
+        background: #e9f6ec;
+      }
+      .status.down {
+        border-color: #b3261e;
+        background: #fdecec;
+      }
+      .status code {
+        display: block;
+        margin-top: 6px;
+        font-size: 14px;
       }
       .mock-panel {
         max-width: 520px; /* stays clear of the open widget on a laptop screen */
@@ -49,19 +69,23 @@
     </style>
   </head>
   <body>
-    <header><strong>Delaware State University</strong> (widget demo page)</header>
+    <header><strong>Delaware State University</strong> (chat assistant demo)</header>
     <main>
-      <h1>Chat widget demo</h1>
+      <h1>DSU chat assistant demo</h1>
       <p>
-        This page loads the widget the same way dsu.edu would: one script tag. Click
-        <strong>Ask DSU</strong> in the bottom-right corner and ask a question, for example
-        "Which dorms have carpeted rooms?".
+        This page loads the chat widget the same way desu.edu would: one script tag. Open the chat
+        in the bottom-right corner and ask a question, for example "Which dorms have carpeted
+        rooms?" or "How do I apply for housing?".
       </p>
       <p>
-        The backend must be running on http://localhost:8000 and allow this page's origin
-        (http://localhost:8080). See widget/README.md. To try the widget without a backend, open
-        <a href="?mock=1">demo.html?mock=1</a>.
+        Answers come from the backend on http://localhost:8000, which searches DSU's website
+        content and asks Claude to answer from it. Start both with
+        <code>./scripts/run-demo.sh</code> (see widget/README.md). To try the widget without the
+        backend, open <a href="?mock=1">demo.html?mock=1</a>.
       </p>
+
+      <!-- Backend check (demo page only): is the API running on localhost:8000? -->
+      <p class="status" id="status" role="status" hidden></p>
 
       <section class="mock-panel" id="mock-panel" hidden>
         <h2>Mock mode</h2>
@@ -98,6 +122,28 @@
     <script src="dsu-chat-mock.js"></script>
     <script src="dsu-chat.js" data-api-url="http://localhost:8000" defer></script>
     <script>
+      // Backend check: tell the tester whether the API is reachable before they ask anything.
+      if (!window.DSU_CHAT_MOCK) {
+        const status = document.getElementById("status");
+        const show = (kind, html) => {
+          status.className = `status ${kind}`;
+          status.innerHTML = html; // fixed text only
+          status.hidden = false;
+        };
+        fetch("http://localhost:8000/health", { signal: AbortSignal.timeout(5000) })
+          .then((response) => {
+            if (!response.ok) throw new Error(response.status);
+            show("ok", "<strong>Connected.</strong> The backend is running, so answers are live.");
+          })
+          .catch(() =>
+            show(
+              "down",
+              "<strong>The backend isn't running</strong> (or blocks this page). Start it from " +
+                "the project folder:<code>./scripts/run-demo.sh</code>"
+            )
+          );
+      }
+
       // Mock panel buttons: open the widget and ask the question. Demo page only.
       if (window.DSU_CHAT_MOCK) {
         document.getElementById("mock-panel").hidden = false;
@@ -108,6 +154,8 @@
           if (!button || !input) return;
           const launcher = root.querySelector("[aria-controls]");
           if (launcher?.getAttribute("aria-expanded") === "false") launcher.click();
+          const start = root.querySelector(".start");
+          if (start?.offsetParent) start.click(); // on the home screen: start a new chat
           input.value = button.hasAttribute("data-fill-too-long")
             ? "a".repeat(1001)
             : button.dataset.question;
