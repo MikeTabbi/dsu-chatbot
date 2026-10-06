@@ -129,6 +129,8 @@ FIGURES = {
     ),
     "phone number": re.compile(r"(\(\d{3}\)\s?|\b\d{3}[.\-\s])\d{3}[.\-\s]\d{4}\b"),
 }
+# A link to a DSU page in the answer text must also be cited (the widget shows cited pages).
+DSU_LINK = re.compile(r"https?://[^\s)\]>]*desu\.edu", re.IGNORECASE)
 
 
 @dataclass
@@ -202,7 +204,10 @@ def _norm_url(url: str) -> str:
 
 
 def _norm_text(text: str) -> str:
-    return text.lower().replace("’", "'").replace("‘", "'")
+    """Lowercase with straight quotes, and the school's full name read as "dsu", so "questions
+    about Delaware State University" matches the same checks as "questions about DSU"."""
+    text = text.lower().replace("’", "'").replace("‘", "'")
+    return text.replace("delaware state university", "dsu")
 
 
 def _phrase_in(phrase: str, text: str) -> bool:
@@ -286,6 +291,8 @@ def check_answer(case: Case, status: int, body: dict) -> Result:
         stated = [kind for kind, pattern in FIGURES.items() if pattern.search(answer)]
         if stated:
             failures.append("states a " + " and a ".join(stated) + " without citing a source")
+        if DSU_LINK.search(answer):
+            failures.append("links a DSU page without citing a source")
 
     missing = [p for p in case.must_contain if not _phrase_in(p, text)]
     forbidden = [p for p in case.must_not_contain if _phrase_in(p, text)]
