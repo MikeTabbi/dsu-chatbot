@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -213,14 +214,22 @@ def test_cli_without_ask_prints_the_prompt_and_makes_no_call(monkeypatch, capsys
     assert fake.calls == []
 
 
+def linked_chunk(n, url, text="A page."):
+    return replace(chunk(n, text), source_url=url)
+
+
 def test_linked_sources_match_source_urls_exactly():
-    urls = ["https://www.desu.edu/a", "https://www.desu.edu/b", "https://www.desu.edu/a"]
+    sources = [
+        linked_chunk(1, "https://www.desu.edu/a"),
+        linked_chunk(2, "https://www.desu.edu/b"),
+        linked_chunk(3, "https://www.desu.edu/a"),
+    ]
     text = (
         "See [A](https://www.desu.edu/a), <https://www.desu.edu/b>, and https://www.desu.edu/a."
         " Not https://www.desu.edu/b/c or https://www.desu.edu/z, https://my.desu.edu/x."
         " Elsewhere: https://desu.edu.example.com/a and https://example.com/a."
     )
-    linked = linked_sources(text, urls)
+    linked = linked_sources(text, sources)
     assert linked.cited == [1, 2]  # a URL shared by sources 1 and 3 needs only the first
     assert linked.unknown == [
         "https://www.desu.edu/b/c",
@@ -229,7 +238,22 @@ def test_linked_sources_match_source_urls_exactly():
     ]
 
 
-def test_linked_sources_with_no_links():
-    assert linked_sources("I can only help with DSU questions.", ["https://www.desu.edu/a"]) == (
-        LinkedSources([], [])
+def test_a_link_from_a_sources_text_is_neither_cited_nor_unknown():
+    page_text = "Read the [contract](https://www.desu.edu/files/contract.pdf) first."
+    sources = [linked_chunk(1, "https://www.desu.edu/housing", page_text)]
+    text = (
+        "Read https://www.desu.edu/files/contract.pdf. Also https://www.desu.edu/files/contract"
+        " and https://www.desu.edu/files/rules.pdf."
     )
+    linked = linked_sources(text, sources)
+    assert linked.cited == []
+    # In the page text exactly: allowed. A prefix of it, or in neither: unknown.
+    assert linked.unknown == [
+        "https://www.desu.edu/files/contract",
+        "https://www.desu.edu/files/rules.pdf",
+    ]
+
+
+def test_linked_sources_with_no_links():
+    sources = [linked_chunk(1, "https://www.desu.edu/a")]
+    assert linked_sources("I can only help with DSU questions.", sources) == LinkedSources([], [])

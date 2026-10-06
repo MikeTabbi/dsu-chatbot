@@ -14,7 +14,7 @@ from api.app.main import (
     get_settings,
 )
 from api.app.prompt import build_prompt
-from api.app.retriever import LocalKeywordRetriever
+from api.app.retriever import LocalKeywordRetriever, ScoredChunk
 from ingestion.chunk import Chunk
 
 HOUSING = "https://www.desu.edu/student-life/housing-dining"
@@ -58,6 +58,14 @@ CHUNKS = [
 class FailingClient:
     def complete(self, system, messages):
         raise ClaudeError("timeout", "APITimeoutError at https://internal.example/v1")
+
+
+class OnePageRetriever:
+    def __init__(self, page):
+        self.page = page
+
+    def search(self, question, k=5):
+        return [ScoredChunk(self.page, 1.0)]
 
 
 class RecordingRetriever(LocalKeywordRetriever):
@@ -209,6 +217,18 @@ def test_a_dsu_link_to_no_source_is_not_cited_and_is_logged(client, fake, caplog
         f"answer links a page not among its sources request_id={body['request_id']} url={url}\n"
         in caplog.text + "\n"
     )
+
+
+def test_only_a_dsu_link_in_neither_the_sources_nor_their_text_is_logged(client, fake, caplog):
+    pdf = "https://www.desu.edu/files/housing-contract.pdf"
+    page = chunk(0, "Housing & Dining > Contract", f"Carpeted rooms. Sign the [contract]({pdf}).")
+    app.dependency_overrides[get_chat_retriever] = lambda: OnePageRetriever(page)
+    made_up = "https://www.desu.edu/files/housing-rules.pdf"
+    with caplog.at_level(logging.WARNING, logger="api.app.main"):
+        body = ask(client, fake, f"Sign {pdf}. Rules: {made_up}.\n<cited></cited>")
+    assert fake.calls and body["sources"] == []
+    assert f"url={pdf}" not in caplog.text
+    assert f"request_id={body['request_id']} url={made_up}" in caplog.text
 
 
 def test_a_link_to_another_site_is_neither_cited_nor_logged(client, fake, caplog):

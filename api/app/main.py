@@ -255,8 +255,9 @@ def chat(
 
     answer = parse_citations(reply.text, len(chunks))
     # A page the answer links is a page it used, even if its <cited> line leaves it out (a decline
-    # that still links DSU's tuition page). A desu.edu link to no source is logged, never shown.
-    linked = linked_sources(answer.text, [c.source_url for c in chunks])
+    # that still links DSU's tuition page). A desu.edu link in no source's URL or text (possibly
+    # made up) is logged, never shown.
+    linked = linked_sources(answer.text, chunks)
     for url in linked.unknown:
         log.warning(
             "answer links a page not among its sources request_id=%s url=%s", request_id, url
