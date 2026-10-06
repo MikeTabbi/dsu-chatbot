@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     search_endpoint: str = ""
     search_api_key: str = ""
     search_index_name: str = "dsu-content"
-    retriever: str = "local"  # local (keyword search over chunks_dir) | azure (not built yet)
-    chunks_dir: str = "data/chunks"
+    retriever: str = "local"  # local (keyword search over index_path) | azure (not built yet)
+    # The local index the ingestion pipeline syncs; the local retriever reloads it when it changes.
+    index_path: str = "data/index/chunks.json"
     retriever_min_score: float = 0.1
     synonyms_file: str = "api/app/synonyms.yaml"  # word groups for the local retriever
     chat_top_k: int = 5  # chunks retrieved per question and passed to Claude

@@ -14,6 +14,9 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 DEFAULT_INPUT_DIR = Path("data/raw")
 DEFAULT_OUTPUT_DIR = Path("data/extracted")
 MIN_WORDS = 50  # pages with fewer words of content are flagged low_text
+# Bump when a code change would extract different text or metadata from the same saved HTML.
+# The pipeline then re-extracts and re-chunks every page, even ones not due a check.
+EXTRACTOR_VERSION = 1
 
 # The content region of the desu.edu theme (Drupal 7, dsu2016), most specific first.
 CONTENT_SELECTORS = ("main [role=main]", "[role=main]", "main")
@@ -141,6 +144,8 @@ def extract_all(
     for meta_path in sorted(input_dir.glob("*.json")):
         if meta_path.name == "manifest.json":
             continue
+        if not json.loads(meta_path.read_text()).get("html_file"):
+            continue  # never fetched, or deleted after failing checks: nothing to extract
         page = extract_page(meta_path, output_dir)
         for warning in page.warnings:
             log.warning("%s: %s", page.url, warning)

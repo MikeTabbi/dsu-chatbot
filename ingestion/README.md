@@ -7,8 +7,8 @@ Planned steps:
 2. **Skip unchanged** pages using conditional requests and a hash of the extracted text
    (`python -m ingestion.pipeline`, below).
 3. **Clean and chunk** text, keeping the source URL and date on every chunk.
-4. **Upsert** new/changed chunks into the index.
-5. **Delete** chunks for pages that were removed or moved.
+4. **Sync** the index: add new chunks, update changed ones, remove ones that are gone.
+5. **Delete** pages removed from the registry or gone from the site (see the pipeline, below).
 
 Refresh schedule by source type:
 - Slow-changing (catalog, policies): weekly or nightly
@@ -167,16 +167,23 @@ and a `chunks` list. A page with no text still gets a file with an empty list. E
 ## Updating: the pipeline
 
 ```bash
-python -m ingestion.pipeline            # check the pages that are due; crawl, extract, chunk
+python -m ingestion.pipeline            # check the pages that are due; crawl, extract, chunk, sync
 python -m ingestion.pipeline --force    # check every page, due or not
 python -m ingestion.pipeline --topic housing --limit 3
+python -m ingestion.pipeline --sources /tmp/sources.yaml --raw /tmp/data/raw \
+    --extracted /tmp/data/extracted --chunks /tmp/data/chunks --index /tmp/data/index/chunks.json
 ```
 
-This is the command to run on a schedule. For each due source it crawls, then extracts and chunks
-only the pages that changed, and prints a summary:
+This is the command to run on a schedule. It is the single entry point: it deletes pages that left
+[sources.yaml](sources.yaml), crawls the due sources, extracts and chunks only the pages that
+changed, syncs the search index, and prints a summary. It exits with status 1 if any page failed,
+so a scheduler can alert on it.
 
 ```text
-Checked 18: 17 unchanged, 1 changed, 0 new, 0 failed. Skipped 0 not due.
+Checked 18: 17 unchanged, 1 changed, 0 new, 0 failed. Skipped 0 not due. Reprocessed 0 for a new extractor or chunker version.
+Chunks: 2 added, 1 updated, 2 removed.
+Pages deleted: 0. Pages failing: 0. Redirects to review: 1.
+  redirect: https://www.desu.edu/old-page -> https://www.desu.edu/new-page (update sources.yaml)
 ```
 
 - **unchanged**: the server answered 304, or the page came back with the same `text_hash` and
@@ -184,9 +191,67 @@ Checked 18: 17 unchanged, 1 changed, 0 new, 0 failed. Skipped 0 not due.
 - **changed**: new text or a new `modified_time`. The page is re-extracted and re-chunked. Chunk
   IDs only change for sections whose text changed (see Chunking).
 - **new**: no extracted copy from an earlier run.
-- **failed**: the crawl or extraction failed. The previous files are kept, and the page is
-  checked again on the next run.
+- **reprocessed**: the page didn't change, but it was processed by an older extractor or chunker
+  version, so it was re-extracted and re-chunked from the saved copy (see Processing versions).
+- **failed** (also **pages failing**): the crawl or extraction failed. The previous files are
+  kept, and the page is checked again on the next run. A 404 or 410 also shows how many checks in
+  a row it has failed.
 - **not due**: checked too recently for its `change_frequency`. No request is made.
+- **chunks added / updated / removed**: what the index sync changed, by chunk ID.
+- **pages deleted**: pages whose files and chunks this run deleted, and why.
+- **redirects to review**: sources that permanently redirect (301/308) to another desu.edu URL.
+
+**Deleted and moved pages.**
+
+- *Removed from sources.yaml*: the next run deletes the page's raw HTML and metadata, extracted
+  page, and chunk file, and the index sync removes its chunks. Every file named for a URL that
+  isn't in sources.yaml is deleted, so stray files from older runs go too. `--topic` and `--limit`
+  only narrow what is checked; they never delete the other pages.
+- *404 or 410*: a site can drop a page for a while, so one failure deletes nothing. The page is
+  reported as failing on every run, and `missing_checks` in `data/raw/<name>.json` counts the
+  checks in a row that answered 404 or 410. When it reaches `delete_after_missing_checks` in
+  sources.yaml (3), the page's HTML, extracted page, and chunks are deleted. Its metadata stays,
+  without `html_file`, so the count carries on and the page keeps being reported until it is
+  removed from sources.yaml. A 200 or 304 resets the count to 0 (and a page that comes back after
+  being deleted is fetched in full and processed as new). Timeouts, 5xx, and robots.txt refusals
+  don't count either way. A failing page stays due, so it is checked every run.
+- *Permanent redirect*: the page is still fetched and indexed from where it landed, and reported
+  under redirects to review. sources.yaml is never rewritten: a maintainer checks the new URL and
+  updates the entry, and the next run deletes the old URL's files. 302/303/307 are temporary and
+  aren't reported. A redirect off desu.edu is refused by the crawler and shows as failing.
+
+**Index sync.** After chunking, the pipeline makes the index hold exactly the chunks in
+`data/chunks/`, through the `Index` interface in [index.py](index.py): `fingerprints()` lists
+every chunk ID in the index with a hash of the stored chunk, and `apply(upserts, deletes)` writes
+one batch. A chunk ID not in the index is added; an ID whose fields changed (same text, but say a
+new `modified_time`) is updated; an ID no longer in any chunk file is removed. Chunk IDs are
+deterministic (see Chunking), so an unchanged page sends nothing, and a run with no changes
+doesn't write the index at all. The Azure AI Search index (#22) can implement the same two
+methods (a key-and-fingerprint query, and one `mergeOrUpload`/`delete` batch).
+
+`LocalIndex` stores the chunks in one file, `data/index/chunks.json` (`--index`), which the local
+retriever reads. It is written to a temp file and renamed over the old one, so a reader never sees
+half a file. **How the server picks up new chunks:** before each search the local retriever
+checks the index file's inode, modification time, and size (one `stat`, microseconds) and rebuilds
+its in-memory index if they changed, so new chunks are served on the next question with no
+restart. This was the simplest reliable option: there is no file-watcher thread or reload endpoint
+to keep running, a rename is atomic, and rebuilding a few hundred chunks takes milliseconds. If a
+rebuild fails, the previous chunks keep serving until the file changes again. With several
+server workers, each one reloads on its own next search.
+
+**Processing versions.** `EXTRACTOR_VERSION` in [extract.py](extract.py) and `CHUNKER_VERSION` in
+[chunk.py](chunk.py) are saved as `extractor_version` and `chunker_version` in each page's
+`data/raw/<name>.json` after it is processed. When either differs from the code, the next run
+re-extracts and re-chunks that page from its saved HTML, even if the page isn't due or answers
+304, and reports it as reprocessed (or changed, if its text changed).
+
+- Bump `EXTRACTOR_VERSION` when a change to extract.py would produce different text or metadata
+  from the same HTML: content or noise selectors, Markdown rendering, link handling, title,
+  canonical URL, `modified_time`, `low_text` threshold.
+- Bump `CHUNKER_VERSION` when a change to chunk.py would produce different chunks from the same
+  extracted page: `MAX_WORDS`, `OVERLAP_WORDS`, splitting rules, `chunk_id`, or `Chunk` fields.
+- Don't bump for refactors, logging, comments, tests, or CLI changes that leave the output the
+  same. Bumping when not needed only costs one re-processing run.
 
 **When pages are due.** `check_interval_hours` at the top of [sources.yaml](sources.yaml) sets how
 long after its last check (`checked_at` in `data/raw/<name>.json`) a page is checked again:
@@ -195,7 +260,9 @@ reaches a page a few seconds sooner than yesterday still checks it. `--force` ch
 
 **How changes are detected.** There is no separate state file; per-URL state is the metadata the
 crawler and extractor already write: `checked_at`, `fetched_at`, `etag`, `last_modified` in
-`data/raw/<name>.json`, and `modified_time`, `text_hash` in `data/extracted/<name>.json`.
+`data/raw/<name>.json`, and `modified_time`, `text_hash` in `data/extracted/<name>.json`. The
+pipeline adds `missing_checks`, `extractor_version`, and `chunker_version` to the first; the
+crawler keeps them when it rewrites the file.
 
 1. If the page was saved before, the request is conditional (see Crawling). A 304 means unchanged.
    desu.edu (checked October 2026) sends both `ETag` and `Last-Modified` from Drupal 7's page
@@ -208,6 +275,6 @@ crawler and extractor already write: `checked_at`, `fetched_at`, `etag`, `last_m
    A new `modified_time` with identical text still re-chunks, so chunks carry the current date.
 
 Every request, including ones answered with a 304, waits out the crawl delay. A 304 skips only
-the download and the processing. Re-chunking after changing the extractor or chunker isn't
-change detection: run `python -m ingestion.extract` and `python -m ingestion.chunk` directly.
-Updating the search index and removing deleted pages are #13.
+the download and the processing. After changing the extractor or chunker, bump its version (see
+Processing versions) rather than re-running `python -m ingestion.extract` or `ingestion.chunk` by
+hand, so the pipeline's state and the index stay in step.

@@ -24,6 +24,7 @@ DEFAULT_TIMEOUT = 20.0
 DEFAULT_RETRIES = 2
 MAX_REDIRECTS = 5
 REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+PERMANENT_REDIRECTS = (301, 308)
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class FetchResult:
     content_type: str | None = None
     encoding: str | None = None
     redirects: list[str] = field(default_factory=list)
+    # Where the URL permanently moved: the end of the chain of 301/308 hops it starts with.
+    moved_to: str | None = None
     html_file: str | None = None
     checked_at: str | None = None  # last 200 or 304 from the server; later than fetched_at on a 304
     etag: str | None = None
@@ -96,7 +99,7 @@ class Crawler:
 
     def load_meta(self, url: str) -> dict | None:
         """The metadata saved by the last successful fetch of url, or None if there is none."""
-        path = self.output_dir / f"{_file_stem(url)}.json"
+        path = self._meta_path(url)
         try:
             return json.loads(path.read_text())
         except FileNotFoundError:
@@ -104,6 +107,13 @@ class Crawler:
         except (OSError, ValueError) as e:
             log.warning("ignoring unreadable %s: %s", path, e)
             return None
+
+    def update_meta(self, url: str, /, **fields) -> None:
+        """Set fields in url's saved metadata (creating it if there is none), keeping the rest.
+        The pipeline keeps its per-page state here alongside what the crawler records."""
+        meta = self.load_meta(url) or {"url": url}
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._meta_path(url).write_text(json.dumps({**meta, **fields}, indent=2) + "\n")
 
     def fetch(self, source: Source, previous: dict | None = None) -> FetchResult:
         """Fetch one source. Given the metadata of the last fetch, asks only for a newer copy."""
@@ -125,6 +135,10 @@ class Crawler:
 
             if response.status_code in REDIRECT_STATUSES and "location" in response.headers:
                 url = urljoin(url, response.headers["location"])
+                if response.status_code in PERMANENT_REDIRECTS and (
+                    result.moved_to == result.final_url or not result.redirects
+                ):
+                    result.moved_to = url
                 result.redirects.append(url)
                 result.final_url = url
                 log.info("redirect %s -> %s", response.url, url)
@@ -253,8 +267,10 @@ class Crawler:
     def _write_meta(self, result: FetchResult) -> None:
         meta = asdict(result)
         del meta["error"]
-        path = self.output_dir / f"{_file_stem(result.url)}.json"
-        path.write_text(json.dumps(meta, indent=2) + "\n")
+        self.update_meta(result.url, **meta)
+
+    def _meta_path(self, url: str) -> Path:
+        return self.output_dir / f"{_file_stem(url)}.json"
 
     def _write_manifest(self, results: list[FetchResult]) -> None:
         manifest = {

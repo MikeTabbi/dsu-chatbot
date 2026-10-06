@@ -13,6 +13,10 @@ check_interval_hours:
   medium: 24
   slow: 168
 
+# A page that answers 404 or 410 on this many checks in a row has its files and chunks deleted.
+# Fewer failures are only reported, since a site can drop a page briefly.
+delete_after_missing_checks: 3
+
 sources:
   # Housing
   - url: https://www.desu.edu/student-life/housing-dining

@@ -1,18 +1,17 @@
-import json
-from dataclasses import asdict
-
 import pytest
 
 from api.app.config import Settings
 from api.app.retriever import (
     SYNONYMS_PATH,
     LocalKeywordRetriever,
+    ReloadingRetriever,
     SynonymsError,
     get_retriever,
     load_synonyms,
     main,
 )
 from ingestion.chunk import Chunk
+from ingestion.index import LocalIndex
 
 SITE = "https://www.desu.edu"
 
@@ -129,10 +128,9 @@ def test_word_in_every_chunk_is_below_the_threshold():
     assert LocalKeywordRetriever(chunks).search("housing", k=5) == []
 
 
-def test_loads_chunk_files_and_is_selected_by_config(tmp_path):
-    page = {"url": SITE + "/housing", "chunks": [asdict(c) for c in CHUNKS]}
-    (tmp_path / "housing.json").write_text(json.dumps(page))
-    retriever = get_retriever(Settings(retriever="local", chunks_dir=str(tmp_path)))
+def test_loads_the_index_file_and_is_selected_by_config(tmp_path):
+    LocalIndex(tmp_path / "chunks.json").apply(CHUNKS, [])
+    retriever = get_retriever(Settings(retriever="local", index_path=str(tmp_path / "chunks.json")))
     assert len(retriever.chunks) == len(CHUNKS)
     assert paths(retriever.search("carpet", k=1)) == [CHUNKS[1].heading_path]
 
@@ -140,6 +138,27 @@ def test_loads_chunk_files_and_is_selected_by_config(tmp_path):
         get_retriever(Settings(retriever="azure"))
     with pytest.raises(ValueError):
         get_retriever(Settings(retriever="elastic"))
+
+
+def test_picks_up_index_changes_without_a_restart(tmp_path):
+    index = LocalIndex(tmp_path / "chunks.json")
+    retriever = ReloadingRetriever(index.path)  # no index yet: nothing to find
+    assert retriever.search("carpet", k=1) == []
+
+    index.apply(CHUNKS, [])
+    assert paths(retriever.search("carpet", k=1)) == [CHUNKS[1].heading_path]
+
+    index.apply([], [CHUNKS[1].chunk_id])
+    assert retriever.search("carpet", k=1) == []
+    assert len(retriever.chunks) == len(CHUNKS) - 1
+
+
+def test_unreadable_index_keeps_serving_the_previous_chunks(tmp_path):
+    index = LocalIndex(tmp_path / "chunks.json")
+    index.apply(CHUNKS, [])
+    retriever = ReloadingRetriever(index.path)
+    index.path.write_text("{not json")
+    assert paths(retriever.search("carpet", k=1)) == [CHUNKS[1].heading_path]
 
 
 def test_cli_prints_score_title_heading_path_and_url(monkeypatch, capsys):
@@ -203,9 +222,10 @@ def test_empty_or_missing_synonyms_file_falls_back_to_plain_search(tmp_path, con
     if content is not None:
         path.write_text(content)
     assert load_synonyms(path) == []
-    page = {"url": SITE + "/orgs", "chunks": [asdict(c) for c in ORG_CHUNKS]}
-    (tmp_path / "orgs.json").write_text(json.dumps(page))
-    retriever = get_retriever(Settings(chunks_dir=str(tmp_path), synonyms_file=str(path)))
+    LocalIndex(tmp_path / "chunks.json").apply(ORG_CHUNKS, [])
+    retriever = get_retriever(
+        Settings(index_path=str(tmp_path / "chunks.json"), synonyms_file=str(path))
+    )
     plain = LocalKeywordRetriever(ORG_CHUNKS)
     assert retriever.expand("clubs") == []
     assert retriever.search("clubs", k=5) == plain.search("clubs", k=5)

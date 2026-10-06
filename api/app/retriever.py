@@ -1,7 +1,6 @@
 """Find the chunks most relevant to a question. /chat depends on the Retriever interface only."""
 
 import argparse
-import json
 import logging
 import re
 import sqlite3
@@ -13,8 +12,8 @@ from typing import Protocol
 import yaml
 
 from api.app.config import Settings, settings
-from ingestion.chunk import DEFAULT_OUTPUT_DIR as CHUNKS_DIR
 from ingestion.chunk import Chunk
+from ingestion.index import LocalIndex
 
 log = logging.getLogger(__name__)
 
@@ -123,21 +122,6 @@ class LocalKeywordRetriever:
             [(i, c.title, c.heading_path, LINK.sub(r"\1", c.text)) for i, c in enumerate(chunks)],
         )
 
-    @classmethod
-    def from_dir(
-        cls,
-        chunks_dir: Path | str = CHUNKS_DIR,
-        min_score: float = MIN_SCORE,
-        synonyms: list[list[str]] | None = None,
-    ):
-        """Load every chunk file ingestion.chunk wrote to chunks_dir."""
-        chunks = [
-            Chunk(**c)
-            for path in sorted(Path(chunks_dir).glob("*.json"))
-            for c in json.loads(path.read_text())["chunks"]
-        ]
-        return cls(chunks, min_score, synonyms)
-
     def expand(self, question: str) -> list[str]:
         """The synonyms added to the question: the other words of every group it mentions."""
         asked = _fold_phrase(question)
@@ -177,6 +161,70 @@ class LocalKeywordRetriever:
         return {rowid: -rank for rowid, rank in rows}  # FTS5: lower rank is better
 
 
+class ReloadingRetriever:
+    """The local retriever over the index file the ingestion pipeline syncs, rebuilt whenever
+    that file changes, so a running server picks up new chunks without a restart.
+
+    Each search stats the file (microseconds) and rebuilds only when it was replaced or its
+    modification time or size changed. The pipeline replaces the file atomically, so a rebuild
+    never sees half a file. If a rebuild fails, the previous chunks keep serving until the file
+    changes again.
+    """
+
+    def __init__(
+        self,
+        index_path: Path | str,
+        min_score: float = MIN_SCORE,
+        synonyms: list[list[str]] | None = None,
+    ):
+        self.index = LocalIndex(index_path)
+        self.min_score = min_score
+        self.synonyms = synonyms
+        self._lock = threading.Lock()
+        self._version: tuple[int, int, int] | None | str = "not loaded"
+        self._current = LocalKeywordRetriever([], min_score, synonyms)
+        self._reload_if_changed()
+
+    @property
+    def chunks(self) -> list[Chunk]:
+        return self._reload_if_changed().chunks
+
+    def expand(self, question: str) -> list[str]:
+        return self._current.expand(question)
+
+    def search(self, question: str, k: int = 5) -> list[ScoredChunk]:
+        return self._reload_if_changed().search(question, k)
+
+    def _reload_if_changed(self) -> LocalKeywordRetriever:
+        version = self._file_version()
+        if version == self._version:
+            return self._current
+        with self._lock:
+            if version != self._version:
+                try:
+                    chunks = self.index.chunks()
+                except (OSError, ValueError, KeyError, TypeError) as e:
+                    log.error(
+                        "could not load %s; keeping the previous chunks: %r", self.index.path, e
+                    )
+                    self._version = version  # retry once the file changes again
+                    return self._current
+                self._current = LocalKeywordRetriever(chunks, self.min_score, self.synonyms)
+                self._version = version
+                if version is None:
+                    log.warning("no index at %s; run python -m ingestion.pipeline", self.index.path)
+                else:
+                    log.info("loaded %d chunks from %s", len(chunks), self.index.path)
+        return self._current
+
+    def _file_version(self) -> tuple[int, int, int] | None:
+        try:
+            stat = self.index.path.stat()
+        except FileNotFoundError:
+            return None
+        return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
 def _match_query(question: str) -> str:
     """An FTS5 query that matches any content word of the question. User text is never parsed
     as FTS5 syntax: each word is quoted."""
@@ -205,8 +253,8 @@ def _contains_phrase(text: str, phrase: str) -> bool:
 def get_retriever(config: Settings = settings) -> Retriever:
     """The retriever the RETRIEVER setting selects."""
     if config.retriever == "local":
-        return LocalKeywordRetriever.from_dir(
-            config.chunks_dir, config.retriever_min_score, load_synonyms(config.synonyms_file)
+        return ReloadingRetriever(
+            config.index_path, config.retriever_min_score, load_synonyms(config.synonyms_file)
         )
     if config.retriever == "azure":
         raise NotImplementedError("Azure AI Search retriever is not built yet (#22)")

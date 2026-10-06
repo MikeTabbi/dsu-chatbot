@@ -166,7 +166,7 @@ Answers come from an AI model reading web pages, so treat them as untrusted text
 ## Running it locally
 
 `demo.html` is the official demo page. It loads the widget the way desu.edu will, and its answers
-come from the backend: it searches DSU's website content (`data/chunks`) and asks Claude to answer
+come from the backend: it searches DSU's website content (`data/index/chunks.json`) and asks Claude to answer
 from what it finds.
 
 1. In `.env` (copy `.env.example` if you don't have one), set `CLAUDE_CLIENT=anthropic` and
@@ -195,8 +195,8 @@ uvicorn api.app.main:app --reload                 # terminal 1, from the repo ro
 python -m http.server 8080 --directory widget      # terminal 2
 ```
 
-With no `data/chunks` (see the main README), every question gets the "couldn't find anything"
-answer.
+With no `data/index/chunks.json` (see the main README), every question gets the "couldn't find
+anything" answer.
 
 To see the phone layout, open your browser's developer tools and turn on the device toolbar (a
 screen narrower than 480px).

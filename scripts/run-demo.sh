@@ -11,9 +11,9 @@ if [ ! -f .env ]; then
   echo "No .env file. Copy .env.example to .env, then set CLAUDE_CLIENT=anthropic and ANTHROPIC_API_KEY."
   exit 1
 fi
-if [ ! -d data/chunks ] || [ -z "$(ls -A data/chunks 2>/dev/null)" ]; then
-  echo "Warning: data/chunks is empty, so every question gets the \"couldn't find anything\" answer."
-  echo "         Build it first (see the main README, \"Retrieval\")."
+if [ ! -s data/index/chunks.json ]; then
+  echo "Warning: no data/index/chunks.json, so every question gets the \"couldn't find anything\" answer."
+  echo "         Build it with python -m ingestion.pipeline (see the main README, \"Retrieval\")."
 fi
 
 PYTHON=python3

@@ -47,14 +47,18 @@ list means nothing relevant was found. The `RETRIEVER` setting picks the impleme
 (the default) or `azure` (Azure AI Search, #22, not built yet).
 
 ```bash
-python -m ingestion.pipeline                                  # crawl, extract, chunk: data/chunks
-python -m ingestion.chunk                                     # or just re-chunk data/extracted
+python -m ingestion.pipeline                                  # crawl, extract, chunk, sync the index
 python -m api.app.retriever "Which halls have carpeted rooms?"   # prints score, title, heading path, URL
 python -m api.app.retriever -k 3 "How do I send my SAT scores?"
 ```
 
-The local retriever loads every file in `CHUNKS_DIR` (default `data/chunks`) into an in-memory
-**SQLite FTS5** index and ranks with FTS5's built-in **BM25**. Why FTS5:
+The local retriever loads the index file the pipeline syncs, `INDEX_PATH` (default
+`data/index/chunks.json`), into an in-memory **SQLite FTS5** index and ranks with FTS5's built-in
+**BM25**. **It reloads on its own:** before each search it checks the file's modification time
+and size, and rebuilds when the pipeline has written a new version, so a running server answers
+from new chunks without a restart (details in
+[ingestion/README.md](ingestion/README.md#updating-the-pipeline)). Run the pipeline once before
+starting the server; until the index file exists, every search comes back empty. Why FTS5:
 
 - It ships with Python's `sqlite3`, so there is no new dependency, no model download, and no
   cloud account. A few hundred chunks index in milliseconds at startup.

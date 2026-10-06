@@ -4,13 +4,17 @@ from datetime import datetime, timedelta
 import httpx
 import pytest
 
+from ingestion import chunk, extract
+from ingestion.crawler import _file_stem
+from ingestion.index import LocalIndex, SyncResult
 from ingestion.pipeline import DUE_SLACK, Summary, is_due, run
-from ingestion.sources import Source, load_check_intervals
+from ingestion.sources import Source, load_check_intervals, load_delete_after
 from ingestion.tests.test_crawler import SAMPLE_PAGE, SITE, FakeSite, html, make_crawler
 
 ETAG = '"1790963877-1"'
 LAST_MODIFIED = "Fri, 02 Oct 2026 17:57:57 GMT"
 INTERVALS = {"fast": timedelta(0), "medium": timedelta(days=1), "slow": timedelta(days=7)}
+DELETE_AFTER = 3
 
 # Same page, but only the site chrome differs: the extracted text is identical.
 CHROME_ONLY_EDIT = SAMPLE_PAGE.replace(b"<footer>Delaware", b"<footer>Dover, Delaware")
@@ -46,8 +50,9 @@ class Pipeline:
         self.raw = tmp_path / "raw"
         self.extracted = tmp_path / "extracted"
         self.chunks = tmp_path / "chunks"
+        self.index = LocalIndex(tmp_path / "index" / "chunks.json")
 
-    def run(self, site, sources, now=None, force=False):
+    def run(self, site, sources, now=None, force=False, registered=None):
         # A fresh crawler every run: nothing carries over except what is on disk.
         crawler, self.clock = make_crawler(self.raw, site, delay=0.0)
         return run(
@@ -55,10 +60,25 @@ class Pipeline:
             crawler,
             self.extracted,
             self.chunks,
+            index=self.index,
+            registered=registered,
             intervals=INTERVALS,
+            delete_after=DELETE_AFTER,
             force=force,
             now=now,
         )
+
+    def page_files(self, path):
+        """Every file the pipeline keeps for the page at path."""
+        stem = _file_stem(SITE + path)
+        return sorted(
+            p.relative_to(self.raw.parent).as_posix()
+            for d in (self.raw, self.extracted, self.chunks)
+            for p in d.glob(f"{stem}.*")
+        )
+
+    def indexed_urls(self):
+        return {c.source_url for c in self.index.chunks()}
 
     def raw_meta(self, path):
         [meta] = [
@@ -74,7 +94,7 @@ class Pipeline:
 
     def mark_chunks(self):
         """Overwrite the chunk file with a marker, to tell whether a run rewrites it."""
-        self.chunk_file().write_text('{"marker": true}')
+        self.chunk_file().write_text('{"marker": true, "chunks": []}')
 
     def chunks_rewritten(self):
         return "marker" not in json.loads(self.chunk_file().read_text())
@@ -233,9 +253,11 @@ def test_failed_page_keeps_its_previous_state_and_stays_due(pipeline):
 
     summary = pipeline.run(site, [source("/housing")], force=True)
 
-    assert summary.failed == [SITE + "/housing: HTTP 404"]
-    assert pipeline.raw_meta("/housing") == before
+    assert summary.failed == [SITE + "/housing: HTTP 404 on 1 check(s) in a row (deleted after 3)"]
+    assert pipeline.raw_meta("/housing") == {**before, "missing_checks": 1}
     assert json.loads(pipeline.chunk_file().read_text())["chunks"]
+    assert pipeline.indexed_urls() == {SITE + "/housing"}
+    assert summary.deleted == []
 
 
 def test_new_source_alongside_unchanged_ones(pipeline):
@@ -285,8 +307,265 @@ def test_due_slack_is_shorter_than_every_configured_interval():
 
 def test_summary_reports_every_count():
     summary = Summary(
-        unchanged=["a", "b"], changed=["c"], new=["d"], failed=["e: x"], not_due=["f"]
+        unchanged=["a", "b"],
+        changed=["c"],
+        new=["d"],
+        reprocessed=["g"],
+        failed=["e: HTTP 404 on 1 check(s) in a row (deleted after 3)"],
+        not_due=["f"],
+        deleted=["h: no longer in sources.yaml"],
+        redirects=["i -> j"],
+        checked=5,
+        index=SyncResult(added=["1", "2"], updated=["3"], removed=["4", "5", "6"]),
     )
-    assert str(summary) == (
-        "Checked 5: 2 unchanged, 1 changed, 1 new, 1 failed. Skipped 1 not due."
+    assert str(summary).splitlines() == [
+        "Checked 5: 2 unchanged, 1 changed, 1 new, 1 failed. Skipped 1 not due. "
+        "Reprocessed 1 for a new extractor or chunker version.",
+        "Chunks: 2 added, 1 updated, 3 removed.",
+        "Pages deleted: 1. Pages failing: 1. Redirects to review: 1.",
+        "  deleted: h: no longer in sources.yaml",
+        "  failing: e: HTTP 404 on 1 check(s) in a row (deleted after 3)",
+        "  redirect: i -> j (update sources.yaml)",
+    ]
+
+
+def test_delete_after_setting_is_in_the_registry():
+    assert load_delete_after() == 3
+
+
+# Deleted and moved pages
+
+
+def test_page_removed_from_sources_is_deleted_with_its_chunks(pipeline):
+    site = FakeSite({"/a": with_validators(), "/b": with_validators()})
+    pipeline.run(site, [source("/a"), source("/b")])
+    assert pipeline.page_files("/b") and pipeline.indexed_urls() == {SITE + "/a", SITE + "/b"}
+
+    summary = pipeline.run(site, [source("/a")])
+
+    assert summary.deleted == [SITE + "/b: no longer in sources.yaml"]
+    assert pipeline.page_files("/b") == []
+    assert pipeline.page_files("/a")
+    assert pipeline.indexed_urls() == {SITE + "/a"}
+    assert summary.index.removed and not summary.index.added
+
+
+def test_checking_part_of_the_registry_keeps_the_other_pages(pipeline):
+    site = FakeSite({"/a": with_validators(), "/b": with_validators()})
+    pipeline.run(site, [source("/a"), source("/b")])
+
+    summary = pipeline.run(site, [source("/a")], registered=[SITE + "/a", SITE + "/b"])
+
+    assert summary.deleted == []
+    assert pipeline.page_files("/b")
+    assert pipeline.indexed_urls() == {SITE + "/a", SITE + "/b"}
+
+
+def test_404_deletes_the_page_only_after_n_checks_in_a_row(pipeline):
+    site = FakeSite({"/a": with_validators(), "/gone": with_validators()})
+    sources = [source("/a"), source("/gone")]
+    pipeline.run(site, sources)
+    files = pipeline.page_files("/gone")
+    site.routes["/gone"] = httpx.Response(404)
+
+    for check in (1, 2):
+        summary = pipeline.run(site, sources, force=True)
+        assert summary.failed == [
+            f"{SITE}/gone: HTTP 404 on {check} check(s) in a row (deleted after 3)"
+        ]
+        assert summary.deleted == []
+        assert pipeline.page_files("/gone") == files
+        assert SITE + "/gone" in pipeline.indexed_urls()
+
+    summary = pipeline.run(site, sources, force=True)
+
+    assert summary.deleted == [f"{SITE}/gone: HTTP 404 on 3 checks in a row"]
+    assert summary.failed == [f"{SITE}/gone: HTTP 404 on 3 checks in a row (deleted)"]
+    assert pipeline.page_files("/gone") == [f"raw/{_file_stem(SITE + '/gone')}.json"]
+    assert pipeline.indexed_urls() == {SITE + "/a"}
+    assert summary.index.removed
+
+    # Still listed in sources.yaml: reported as failing every run, but deleted only once.
+    summary = pipeline.run(site, sources, force=True)
+    assert summary.deleted == []
+    assert summary.failed == [f"{SITE}/gone: HTTP 404 on 4 checks in a row (deleted)"]
+
+
+def test_410_counts_like_404_and_other_errors_do_not_count(pipeline):
+    site = FakeSite({"/gone": with_validators()})
+    pipeline.run(site, [source("/gone")])
+    site.routes["/gone"] = httpx.Response(410)
+    pipeline.run(site, [source("/gone")], force=True)
+    site.routes["/gone"] = httpx.Response(503)
+
+    summary = pipeline.run(site, [source("/gone")], force=True)
+
+    assert summary.failed == [f"{SITE}/gone: HTTP 503"]
+    assert pipeline.raw_meta("/gone")["missing_checks"] == 1
+
+
+def test_a_200_resets_the_failure_count(pipeline):
+    site = FakeSite({"/flaky": with_validators()})
+    pipeline.run(site, [source("/flaky")])
+    site.routes["/flaky"] = httpx.Response(404)
+    pipeline.run(site, [source("/flaky")], force=True)
+    pipeline.run(site, [source("/flaky")], force=True)
+    assert pipeline.raw_meta("/flaky")["missing_checks"] == 2
+
+    site.routes["/flaky"] = with_validators()
+    summary = pipeline.run(site, [source("/flaky")], force=True)
+    assert summary.failed == [] and summary.unchanged == [SITE + "/flaky"]
+    assert pipeline.raw_meta("/flaky")["missing_checks"] == 0
+
+    site.routes["/flaky"] = httpx.Response(404)
+    summary = pipeline.run(site, [source("/flaky")], force=True)
+    assert summary.failed == [f"{SITE}/flaky: HTTP 404 on 1 check(s) in a row (deleted after 3)"]
+    assert pipeline.page_files("/flaky")
+
+
+def test_deleted_page_that_comes_back_is_fetched_in_full(pipeline):
+    site = FakeSite({"/back": with_validators()})
+    pipeline.run(site, [source("/back")])
+    site.routes["/back"] = httpx.Response(404)
+    for _ in range(DELETE_AFTER):
+        pipeline.run(site, [source("/back")], force=True)
+    site.routes["/back"] = with_validators()
+
+    summary = pipeline.run(site, [source("/back")], force=True)
+
+    assert "if-none-match" not in site.requests[-1].headers
+    assert summary.new == [SITE + "/back"]
+    assert pipeline.indexed_urls() == {SITE + "/back"}
+
+
+def test_permanent_redirect_is_reported_and_sources_are_not_rewritten(pipeline):
+    site = FakeSite(
+        {
+            "/old": httpx.Response(301, headers={"location": "/new"}),
+            "/new": with_validators(),
+            "/temp": httpx.Response(302, headers={"location": "/new"}),
+        }
     )
+
+    summary = pipeline.run(site, [source("/old"), source("/temp")])
+
+    assert summary.redirects == [f"{SITE}/old -> {SITE}/new"]  # a 302 is not a move
+    assert summary.new == [SITE + "/old", SITE + "/temp"]  # still processed meanwhile
+    assert "redirect: " + f"{SITE}/old -> {SITE}/new (update sources.yaml)" in str(summary)
+
+
+def test_redirect_off_desu_edu_is_not_reported_as_a_move(pipeline):
+    site = FakeSite({"/out": httpx.Response(301, headers={"location": "https://example.com/"})})
+    summary = pipeline.run(site, [source("/out")])
+    assert summary.redirects == []
+    assert summary.failed == [f"{SITE}/out: off-domain url: https://example.com/"]
+
+
+# Index sync
+
+
+def test_index_follows_the_chunk_files_and_a_quiet_run_writes_nothing(pipeline):
+    site = FakeSite({"/housing": with_validators()})
+    first = pipeline.run(site, [source("/housing")])
+    ids = {json.loads(pipeline.chunk_file().read_text())["chunks"][0]["chunk_id"]}
+    assert len(first.index.added) == len(pipeline.index.chunks()) > 0
+    assert ids <= set(first.index.added)
+    index_mtime = pipeline.index.path.stat().st_mtime_ns
+    chunks_mtime = pipeline.chunk_file().stat().st_mtime_ns
+
+    second = pipeline.run(site, [source("/housing")], force=True)
+
+    assert second.index == SyncResult()
+    assert pipeline.index.path.stat().st_mtime_ns == index_mtime
+    assert pipeline.chunk_file().stat().st_mtime_ns == chunks_mtime
+
+
+def test_changed_page_replaces_its_chunks_in_the_index(pipeline):
+    site = FakeSite({"/housing": with_validators()})
+    pipeline.run(site, [source("/housing")])
+    before = {c.chunk_id for c in pipeline.index.chunks()}
+    site.routes["/housing"] = with_validators(TEXT_EDIT, etag='"1790999999-1"')
+
+    summary = pipeline.run(site, [source("/housing")], force=True)
+
+    after = {c.chunk_id for c in pipeline.index.chunks()}
+    assert set(summary.index.added) == after - before
+    assert set(summary.index.removed) == before - after
+    assert summary.index.added and summary.index.removed  # no orphans left behind
+    assert any("Updated fixture" in c.text for c in pipeline.index.chunks())
+
+
+def test_new_modified_time_updates_chunks_in_place(pipeline):
+    pages = iter([SAMPLE_PAGE, DATE_EDIT])
+    site = FakeSite({"/housing": lambda request: html(next(pages))})
+    pipeline.run(site, [source("/housing")])
+
+    summary = pipeline.run(site, [source("/housing")], force=True)
+
+    assert summary.index.updated and not (summary.index.added or summary.index.removed)
+    assert {c.modified_time for c in pipeline.index.chunks()} == {"2026-09-01T09:00:00-04:00"}
+
+
+# Processing versions
+
+
+@pytest.mark.parametrize(
+    ("module", "name"),
+    [(extract, "EXTRACTOR_VERSION"), (chunk, "CHUNKER_VERSION")],
+)
+def test_version_bump_reprocesses_pages_even_when_not_due(pipeline, monkeypatch, module, name):
+    site = FakeSite({"/housing": with_validators()})
+    pipeline.run(site, [source("/housing", "slow")])
+    assert pipeline.raw_meta("/housing")[name.lower()] == getattr(module, name)
+    pipeline.mark_chunks()
+    site.requests.clear()
+
+    monkeypatch.setattr(module, name, getattr(module, name) + 1)
+    summary = pipeline.run(site, [source("/housing", "slow")])
+
+    assert site.requests == []  # not due: reprocessed from the saved copy
+    assert summary.reprocessed == [SITE + "/housing"]
+    assert summary.not_due == []
+    assert pipeline.chunks_rewritten()
+    assert pipeline.raw_meta("/housing")[name.lower()] == getattr(module, name)
+
+    pipeline.mark_chunks()
+    summary = pipeline.run(site, [source("/housing", "slow")])
+    assert summary.not_due == [SITE + "/housing"] and not pipeline.chunks_rewritten()
+
+
+def test_version_bump_reprocesses_a_page_that_answers_304(pipeline, monkeypatch):
+    site = FakeSite({"/housing": with_validators()})
+    pipeline.run(site, [source("/housing")])
+    pipeline.mark_chunks()
+    monkeypatch.setattr(chunk, "CHUNKER_VERSION", chunk.CHUNKER_VERSION + 1)
+
+    summary = pipeline.run(site, [source("/housing")], force=True)
+
+    assert pipeline.raw_meta("/housing")["status"] == 304
+    assert summary.reprocessed == [SITE + "/housing"]
+    assert pipeline.chunks_rewritten()
+
+
+def test_cli_exits_non_zero_when_a_page_fails(tmp_path, monkeypatch, capsys):
+    from ingestion import pipeline as pipeline_module
+
+    registry = tmp_path / "sources.yaml"
+    registry.write_text(
+        "check_interval_hours: {fast: 0, medium: 24, slow: 168}\n"
+        "delete_after_missing_checks: 3\n"
+        "sources:\n"
+        f"  - {{url: '{SITE}/gone', topic: t, change_frequency: fast, notes: n}}\n"
+    )
+    site = FakeSite({})
+    monkeypatch.setattr(
+        pipeline_module, "Crawler", lambda raw, delay: make_crawler(raw, site, delay=0.0)[0]
+    )
+    args = ["--sources", str(registry), "--index", str(tmp_path / "index.json")]
+    args += [f"--{d}={tmp_path / d}" for d in ("raw", "extracted", "chunks")]
+
+    with pytest.raises(SystemExit) as exit_info:
+        pipeline_module.main(args)
+
+    assert exit_info.value.code == 1
+    assert "Pages failing: 1." in capsys.readouterr().out
