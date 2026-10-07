@@ -1,0 +1,218 @@
+# Rules for `python -m ingestion.discover`, which suggests pages for sources.yaml.
+# See ingestion/README.md (Finding new pages). Discovery never edits sources.yaml.
+#
+# Patterns are matched against the URL without its scheme, query, or trailing slash, e.g.
+# `www.desu.edu/admissions/financial-aid`. A pattern matches that page and every page under it.
+#   *   matches within one path segment:   cast.desu.edu/departments/*
+#   **  matches across segments:           **/news  (a /news section on any host)
+#   $   at the end matches only the page:  cast.desu.edu/departments/*$  (not pages under it)
+#
+# A URL that matches any exclude pattern is dropped. Otherwise the first include rule with a
+# matching pattern gives its suggested topic and change_frequency. URLs no rule includes are
+# dropped.
+
+# Hosts whose /sitemap.xml and HTML /sitemap are read. Each host's robots.txt is checked first,
+# and its Crawl-delay respected.
+hosts:
+  - www.desu.edu
+  - sgaes.desu.edu
+  - cast.desu.edu
+  - chess.desu.edu
+  - business.desu.edu
+  - wchbs.desu.edu
+
+exclude:
+  # News, events, and announcements
+  - "**/news"
+  - "**/events"
+  - "**/campus-events"
+  - "**/homecoming"
+  - "**/cast-blast"
+  - "**/cast-quarterly*"
+  # Commencement pages are event logistics with dates that change every year. Left out for now:
+  # the eval expects "When is graduation?" to be answered as not found.
+  - "**/commencement"
+  # Giving and fundraising
+  - "**/giving"
+  - "**/give-*"
+  - "**/endowment-society-giving"
+  - "**/*endowed-scholarship*"
+  # Board of Trustees (members, minutes, agendas) and governance
+  - "**/board-trustees"
+  - "**/faculty-senate"
+  # HR and job postings
+  - "**/human-resources"
+  - "**/job-opportunities"
+  - "**/join-us"
+  - "**/payroll"
+  # Faculty- and staff-only pages
+  - "**/faculty-profiles"
+  - "**/faculty"
+  - "**/staff"
+  - "**/faculty-administrator-resources*"
+  - "**/employees-disabilities"
+  - "**/banner-self-service-9-advisor-user-guide"
+  - "**/banner-self-service-9-upgrade"
+  - "**/child-lab-staff"
+  # Police crime logs and incident reporting forms
+  - "**/daily-crime-fire-log"
+  - "**/clery-act-compliance"
+  - "**/*-form"
+  - "**/employee-*"
+  - "**/employer-resources"
+  - "**/alumni-resources"
+  - "**/organization-advisor-resources"
+  - "**/eab-navigate-advisors"
+  - "**/eab-navigate-faculty-mentors"
+  - "**/general-education-committee"
+  - "**/archival-rubrics"
+  - "**/parent-newsletter"
+  - "**/donate-*"
+  # Job postings inside student sections (work-study and student employment stay)
+  - "**/*-employment-opportunities"
+  - "**/employment-*"
+  # One-off events, feature stories, and request forms
+  - "**/request-info"
+  - "**/admissions-events"
+  - "**/*-event-registration"
+  - "**/dsu-research-day"
+  - "**/three-minute-thesis*"
+  - "**/pool-parties"
+  - "**/incident-updates"
+  - "**/*honoring*"
+  - "**/their-stories*"
+  - "**/*-stories"
+  - "**/dsu-wears-red"
+  - "**/military-appreciation-month"
+
+include:
+  # Financial aid and tuition
+  - topic: financial-aid
+    change_frequency: medium
+    paths:
+      - www.desu.edu/admissions/financial-aid
+      - www.desu.edu/admissions/tuition-financial-aid
+      - sgaes.desu.edu/graduate-admissions/financial-aid-guidelines
+      - cast.desu.edu/students/scholarships
+
+  # Registrar: dates change every semester
+  - topic: registration
+    change_frequency: fast
+    paths:
+      - www.desu.edu/admissions/office-records-registration
+      - www.desu.edu/admissions/records-registration
+  - topic: registration
+    change_frequency: slow
+    paths:
+      - www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide
+      - www.desu.edu/about/administration/information-technology/banner-self-service-9-student-user-guide
+
+  # IT help for students
+  - topic: it-help
+    change_frequency: slow
+    paths:
+      - www.desu.edu/about/administration/information-technology
+
+  # Admissions (after financial aid and the registrar, which sit under /admissions)
+  - topic: admissions
+    change_frequency: medium
+    paths:
+      - www.desu.edu/admissions
+      - sgaes.desu.edu/admissions
+      - sgaes.desu.edu/graduate-admissions
+      - sgaes.desu.edu/graduate-programming-student-success
+
+  # Student success and advising
+  - topic: advising
+    change_frequency: medium
+    paths:
+      - www.desu.edu/academics/student-success/academic-advisement
+  - topic: student-success
+    change_frequency: medium
+    paths:
+      - www.desu.edu/academics/student-success
+      - www.desu.edu/academics/testing-services
+      - www.desu.edu/about/administration/general-counsel/center-disability-resources$
+      - www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities
+      - www.desu.edu/about/administration/general-counsel/center-disability-resources/using-accomodate
+
+  # Library
+  - topic: library
+    change_frequency: medium
+    paths:
+      - www.desu.edu/academics/library
+
+  # Academics and majors, including the colleges' department and program pages
+  - topic: academics
+    change_frequency: slow
+    paths:
+      - www.desu.edu/academics$
+      - www.desu.edu/academics/majors-programs
+      - www.desu.edu/academics/course-catalogs
+      - www.desu.edu/academics/honors-program
+      - www.desu.edu/academics/honors-program-admission
+      - www.desu.edu/academics/dsu-online
+      - www.desu.edu/academics/international-programs
+      - www.desu.edu/academics/adultcontinuing-education
+      - www.desu.edu/academics/credit-prior-learning
+      - sgaes.desu.edu$
+      - sgaes.desu.edu/dsu-online
+      - sgaes.desu.edu/continuing-education
+      - sgaes.desu.edu/about/dsu-wilmington
+      - "*.desu.edu$"
+      - "*.desu.edu/departments$"
+      - "*.desu.edu/departments/*$"
+      - "*.desu.edu/programs"
+      - "*.desu.edu/about/contact-us$"
+      - chess.desu.edu/course-catalogs
+
+  # Career services
+  - topic: career
+    change_frequency: medium
+    paths:
+      - www.desu.edu/student-life/career-services
+      - www.desu.edu/student-life/student-employment
+      - business.desu.edu/students/business-careers
+      - business.desu.edu/students/internships
+
+  # Health and counseling
+  - topic: health
+    change_frequency: medium
+    paths:
+      - www.desu.edu/student-life/campus-health-services
+      - www.desu.edu/student-life/student-health-services
+
+  # Housing and dining
+  - topic: housing
+    change_frequency: medium
+    paths:
+      - www.desu.edu/student-life/housing-dining
+
+  # Student life and organizations
+  - topic: student-life
+    change_frequency: medium
+    paths:
+      - www.desu.edu/student-life$
+      - www.desu.edu/student-life/student-organizations
+      - www.desu.edu/student-life/wellness-recreation
+      - www.desu.edu/student-life/judicial-affairs
+      - www.desu.edu/student-life/student-concerns
+      - www.desu.edu/student-life/safe-space-coalition
+      - "*.desu.edu/students"
+      - "*.desu.edu/students/clubs-organizations"
+      - "*.desu.edu/clubs-organizations"
+
+  # Campus contacts, directions, parking, and safety
+  - topic: campus
+    change_frequency: medium
+    paths:
+      - www.desu.edu/about/campus-contacts
+      - www.desu.edu/about/location-directions
+      - www.desu.edu/about/glance
+      - www.desu.edu/about/dsu-alerts
+      - www.desu.edu/about/police-department$
+      - www.desu.edu/about/police-department/parking
+      - www.desu.edu/about/police-department/contact-police-dept
+      - www.desu.edu/about/police-department/emergency-alerts
+      - www.desu.edu/about/police-department/contact-us/lost-found
+      - www.desu.edu/about/police-department/safety-corner

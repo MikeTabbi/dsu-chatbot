@@ -79,6 +79,7 @@ class Crawler:
         self._sleep = sleep
         self._clock = clock
         self._robots: dict[str, RobotFileParser] = {}
+        self._robots_status: dict[str, str] = {}  # origin -> how its robots.txt was read
         self._last_request: dict[str, float] = {}
 
     def crawl(self, sources: Iterable[Source]) -> list[FetchResult]:
@@ -160,6 +161,30 @@ class Crawler:
         result.error = f"more than {MAX_REDIRECTS} redirects"
         return result
 
+    def get(self, url: str) -> tuple[httpx.Response | None, str, str | None]:
+        """GET a page without saving it, with the same robots.txt checks, delay, retries, and
+        redirect handling as fetch(). Returns the response, the final URL, and an error (None
+        for a 200)."""
+        for _ in range(MAX_REDIRECTS + 1):
+            if error := self._check_allowed(url):
+                return None, url, error
+            response, error = self._get(url)
+            if response is None:
+                return None, url, error
+            if response.status_code in REDIRECT_STATUSES and "location" in response.headers:
+                url = urljoin(url, response.headers["location"])
+                continue
+            if response.status_code != 200:
+                return response, url, f"HTTP {response.status_code}"
+            return response, url, None
+        return None, url, f"more than {MAX_REDIRECTS} redirects"
+
+    def robots_report(self, url: str) -> str:
+        """How robots.txt for url's host was read, and the delay kept between its requests."""
+        self._robots_for(url)
+        status = self._robots_status[_origin(url)]
+        return f"robots.txt {status}; {self._delay_for(url):g}s between requests"
+
     def _conditional_headers(self, url: str, previous: dict | None) -> dict[str, str]:
         """If-None-Match / If-Modified-Since for the URL the saved copy came from.
 
@@ -199,12 +224,17 @@ class Crawler:
             # Can't tell what the site allows, so fetch nothing from it this run.
             log.warning("robots.txt unavailable for %s (%s); skipping host", origin, error)
             robots.disallow_all = True
+            status = f"unavailable ({error or response.status_code}): host skipped"
         elif response.status_code in (401, 403):
             robots.disallow_all = True
+            status = f"HTTP {response.status_code}: host skipped"
         elif response.status_code >= 400:
             robots.allow_all = True
+            status = f"HTTP {response.status_code}: everything allowed"
         else:
             robots.parse(response.text.splitlines())
+            status = "read"
+        self._robots_status[origin] = status
         self._robots[origin] = robots
         return robots
 
