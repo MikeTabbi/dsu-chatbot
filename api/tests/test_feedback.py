@@ -85,6 +85,16 @@ def test_echoed_personal_details_are_redacted_from_the_answer(client, store, fak
     assert store.recent()[0].exchange.answer == "We'll email [email]."
 
 
+def test_dsu_numbers_in_the_answer_are_kept_in_the_log(client, store, fake):
+    fake.answer = (
+        "Call Housing at 302-857-6090. I can't call you at (302) 555-0199.\n<cited>1</cited>"
+    )
+    ask(client)
+    assert store.recent()[0].exchange.answer == (
+        "Call Housing at 302-857-6090. I can't call you at [phone]."
+    )
+
+
 def test_no_sources_exchange_is_logged(client, store):
     ask(client, "What's the wifi password?")
     e = store.recent()[0].exchange

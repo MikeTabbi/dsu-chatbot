@@ -26,7 +26,7 @@ from api.app.exchange_log import (
 )
 from api.app.prompt import build_prompt, parse_citations, prompt_version
 from api.app.rate_limit import DAY, MINUTE, Limit, RateLimiter, client_ip, get_rate_limiter
-from api.app.redact import redact
+from api.app.redact import redact, redact_echoes
 from api.app.request_guard import RequestGuard
 from api.app.retriever import Retriever, get_retriever
 from ingestion.chunk import Chunk
@@ -323,7 +323,8 @@ def _record(
                 request_id=request_id,
                 timestamp=now(),
                 question=redact(question),
-                answer=redact(answer),  # answers can repeat what the student typed
+                # Only what the student typed: DSU's own numbers in the answer stay readable.
+                answer=redact_echoes(answer, question),
                 outcome=outcome,
                 prompt_version=prompt_version(),
                 latency_ms=round((time.perf_counter() - start) * 1000),

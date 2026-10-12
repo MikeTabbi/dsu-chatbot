@@ -227,8 +227,11 @@ Every `/chat` exchange is stored so wrong answers and missing content can be fou
 **Privacy:** before anything is stored, [api/app/redact.py](api/app/redact.py) replaces emails,
 phone numbers, Social Security numbers, card numbers, and runs of 6 or more digits (student IDs,
 account numbers) with `[email]`, `[phone]`, `[ssn]`, and `[number]`. Years, ZIP codes, and prices
-are kept. The answer is redacted too, since it can repeat what the student typed. Questions are
-never written to the app log, redacted or not.
+are kept. In the answer, only the details the student typed in the question are removed (Claude can
+repeat them back), matched by their digits so a reformatted number is still caught, and emails
+ignoring case. Phone numbers and emails from DSU's pages stay in the logged answer, so a reviewer
+can check that the bot gave the right ones. Questions are never written to the app log, redacted
+or not.
 
 **Failures:** if the store fails, `/chat` still answers; the app log gets a warning with the
 request ID and the error type only.
