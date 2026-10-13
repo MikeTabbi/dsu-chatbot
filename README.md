@@ -115,6 +115,32 @@ python -m api.app.retriever "What clubs can I join?"   # prints "Synonyms added:
 python -m eval.run                                      # retrieval eval, before and after
 ```
 
+### Reranking
+
+Keyword search finds the right page but can rank it below pages that only share the question's
+words: eleven residence-hall pages above the housing comparison matrix for "Which dorms have
+carpeted rooms?". So `/chat` takes `RERANKER_CANDIDATES` chunks (default 40) from the retriever,
+and a reranker ([reranker.py](api/app/reranker.py)) picks the best `CHAT_TOP_K` of them.
+
+- The Claude reranker sends `RERANKER_MODEL` (default `claude-haiku-4-5-20251001`) the question
+  and a short preview of each candidate: title, heading path, URL, and the 60 words of text that
+  mention the question's words most (the first 60 when none do). It replies with candidate IDs in
+  order, as JSON that structured outputs guarantee. An empty list (off-topic or personal
+  questions) keeps keyword order.
+- If the call fails, takes longer than `RERANKER_TIMEOUT_SECONDS` (default 5, no retry), or its
+  reply can't be used, `/chat` keeps keyword order and logs a warning. Reranking never fails
+  `/chat`.
+- Each rerank is a Claude call and counts toward `CLAUDE_DAILY_CALL_BUDGET`. When the budget
+  has room for the answer but not the rerank, the answer uses keyword order.
+- `RERANKER=none` turns it off. With `CLAUDE_CLIENT=fake` (tests, development without a key),
+  the fake reranker keeps keyword order.
+- Cost and speed (October 2026 eval, 39 questions): about 5,200 input and 15 output tokens per
+  rerank, roughly $0.005 per question at Haiku 4.5's $1/$5 per million tokens, and a median of
+  about 1 second added (p90 1.6 s).
+
+Measure it on its own with `python -m eval.run --rerank` (retrieval only; asks before calling
+Claude).
+
 ## Claude client
 
 `/chat` depends only on the `ClaudeClient` interface in
@@ -193,7 +219,8 @@ a request ID:
 
 - The question is trimmed. An empty question, or one over `CHAT_MAX_QUESTION_CHARS` (default
   1000), gets a 422 with a plain `detail` message.
-- It retrieves `CHAT_TOP_K` chunks (default 5), builds the prompt with `build_prompt`, and calls
+- It retrieves `CHAT_TOP_K` chunks (default 5; reranked from a wider set, see
+  [Reranking](#reranking)), builds the prompt with `build_prompt`, and calls
   the Claude client. `sources` lists the pages of the chunks Claude marked as cited (see
   [System prompt](#system-prompt)), one entry per URL, best match first; `last_updated` is a
   `YYYY-MM-DD` date or `null`. An answer that cites nothing (a records redirect, an off-topic

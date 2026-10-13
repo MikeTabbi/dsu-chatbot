@@ -6,6 +6,7 @@ from pydantic import SecretStr
 
 from api.app.claude_client import ClaudeError, FakeClaudeClient
 from api.app.main import app, get_chat_client, get_chat_retriever
+from api.app.reranker import FakeReranker, RerankError
 from api.app.retriever import ScoredChunk
 from eval import run
 from eval.run import (
@@ -388,3 +389,51 @@ def test_cli_full_mode_yes_skips_the_prompt(patched, cases_csv, tmp_path):
     assert [r["answer"] for r in results] == ["I can only help with DSU questions."] * 4
     # the overrides set before main are still in place
     assert set(app.dependency_overrides) == {get_chat_retriever, get_chat_client}
+
+
+# Retrieval with --rerank ------------------------------------------------------------------------
+
+
+class AllChunks:
+    """Every chunk, matrix first, whatever the question."""
+
+    def search(self, question, k=5):
+        return [ScoredChunk(c, 1.0) for c in CHUNKS][:k]
+
+
+def test_check_retrieval_ranks_by_the_reranker_and_records_how():
+    # Keyword order puts the matrix first; a reranker that picks step 7 pushes it out of the top 1.
+    keyword = run.check_retrieval(case(), AllChunks(), k=1)
+    assert keyword.passed and keyword.rerank is None
+    reranked = run.check_retrieval(
+        case(), AllChunks(), k=1, reranker=FakeReranker([7]), candidates=8
+    )
+    assert not reranked.passed
+    assert reranked.source_urls == [CHUNKS[7].source_url]
+    assert reranked.rerank["outcome"] == "reranked"
+
+
+def test_check_retrieval_falls_back_to_keyword_order_when_the_reranker_fails():
+    failing = FakeReranker(error=RerankError("timeout"))
+    result = run.check_retrieval(case(), AllChunks(), k=1, reranker=failing, candidates=8)
+    assert result.passed
+    assert result.rerank["outcome"] == "fallback reason=timeout"
+
+
+def test_cli_rerank_with_the_fake_client_saves_rerank_details(patched, cases_csv, tmp_path, capsys):
+    def ask(prompt):
+        raise AssertionError("asked for confirmation")
+
+    out = tmp_path / "results"
+    args = ["--rerank", "--client", "fake", "--cases", str(cases_csv), "--out", str(out)]
+    assert main(args, ask=ask) == 0
+    assert "Reranked" in capsys.readouterr().out
+    [saved] = out.glob("*-retrieval-rerank.json")
+    data = json.loads(saved.read_text())
+    assert data["candidates"] == 40
+    assert all("rerank" in r for r in data["results"])
+
+
+def test_rerank_is_for_retrieval_only(cases_csv):
+    with pytest.raises(SystemExit):
+        main(["--rerank", "--full", "--cases", str(cases_csv)])

@@ -10,6 +10,7 @@ from api.app.main import (
     UNAVAILABLE_ANSWER,
     app,
     get_chat_client,
+    get_chat_reranker,
     get_chat_retriever,
     get_settings,
 )
@@ -91,6 +92,7 @@ def retriever():
 @pytest.fixture
 def client(fake, retriever):
     app.dependency_overrides[get_chat_retriever] = lambda: retriever
+    app.dependency_overrides[get_chat_reranker] = lambda: None  # keyword order; see test_reranker
     app.dependency_overrides[get_chat_client] = lambda: fake
     app.dependency_overrides[get_settings] = lambda: Settings(
         _env_file=None, chat_top_k=3, chat_max_question_chars=50

@@ -28,6 +28,7 @@ from api.app.prompt import build_prompt, linked_sources, parse_citations, prompt
 from api.app.rate_limit import DAY, MINUTE, Limit, RateLimiter, client_ip, get_rate_limiter
 from api.app.redact import redact, redact_echoes
 from api.app.request_guard import RequestGuard
+from api.app.reranker import Reranker, get_reranker, rerank_or_keyword
 from api.app.retriever import Retriever, get_retriever
 from ingestion.chunk import Chunk
 
@@ -111,6 +112,12 @@ def _current_settings() -> Settings:
 def get_chat_retriever() -> Retriever:
     """Built once (the local retriever indexes every chunk); tests override this dependency."""
     return get_retriever(settings)
+
+
+@functools.cache
+def get_chat_reranker() -> Reranker | None:
+    """Built once; tests override this dependency. None: keyword order."""
+    return get_reranker(settings)
 
 
 @functools.cache
@@ -206,6 +213,7 @@ def health() -> dict[str, str]:
 def chat(
     request: ChatRequest,
     retriever: Annotated[Retriever, Depends(get_chat_retriever)],
+    reranker: Annotated[Reranker | None, Depends(get_chat_reranker)],
     client: Annotated[ClaudeClient, Depends(get_chat_client)],
     config: Annotated[Settings, Depends(get_settings)],
     exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
@@ -222,7 +230,9 @@ def chat(
             422, f"Please keep your question under {config.chat_max_question_chars} characters."
         )
 
-    chunks = [r.chunk for r in retriever.search(question, config.chat_top_k)]
+    k = config.chat_top_k
+    candidates = retriever.search(question, max(k, config.reranker_candidates) if reranker else k)
+    chunks = [r.chunk for r in candidates[:k]]
 
     def record(outcome: Outcome, answer: str, sources=(), reply: ClaudeReply | None = None):
         _record(exchanges, request_id, start, question, answer, outcome, chunks, sources, reply)
@@ -242,6 +252,19 @@ def chat(
             content={"detail": BUSY_ANSWER, "request_id": request_id},
             headers={"Retry-After": str(blocked.retry_after)},
         )
+
+    # A rerank is a second Claude call, so it counts too. Past the budget, keyword order answers.
+    reranks = reranker is not None and reranker.calls_claude and len(candidates) > k
+    allowed = not reranks or limiter.hit("global:claude", [budget]) is None
+    reranked = rerank_or_keyword(reranker, question, candidates, k, allowed)
+    if reranked.outcome != "keyword":
+        log.info(
+            "rerank request_id=%s outcome=%s latency_ms=%.0f",
+            request_id,
+            reranked.outcome,
+            reranked.latency_ms,
+        )
+    chunks = [r.chunk for r in reranked.results]
 
     prompt = build_prompt(question, chunks)
     try:

@@ -75,6 +75,17 @@ def test_returns_answer_text_and_usage():
     }
 
 
+def test_a_json_schema_is_sent_as_structured_output_format():
+    stub = StubSDK(response())
+    schema = {"type": "object", "properties": {"ids": {"type": "array"}}, "required": ["ids"]}
+    client = AnthropicClaudeClient(
+        KEY, "claude-haiku", 200, 5.0, sdk_client=stub, json_schema=schema
+    )
+    client.complete(SYSTEM, MESSAGES)
+    [request] = stub.requests
+    assert request["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+
+
 def test_logs_model_tokens_and_latency_but_never_the_key(caplog):
     client, _ = client_for(response())
     with caplog.at_level(logging.INFO, logger="api.app.claude_client"):
