@@ -97,7 +97,6 @@ Questions we expect but have no good source page for yet:
   shows up only when a page mentions it in passing: the Residential Halls page gives the MLK
   Building's address as part of the Housing office's contact info, so "Where's the MLK Building?"
   is answerable, but most buildings aren't.
-- **Changing majors:** no clear page explains how to switch majors.
 - **DSU's SAT/ACT school code:** the Apply Now page says to send scores through College Board, but
   no page lists DSU's school code. (The SAT/ACT page only shows students how to download their own
   score report.)
