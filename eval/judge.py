@@ -7,12 +7,13 @@ sources, citations for figures and DSU links, must_not_contain) never go to the 
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from api.app.claude_client import ClaudeClient, ClaudeError, get_claude_client
 from api.app.config import Settings
 from api.app.prompt import build_prompt
 from api.app.retriever import Retriever
+from ingestion.chunk import Chunk
 
 # What each expected_behavior means, in the words the judge reads.
 BEHAVIOR_RULES = {
@@ -129,17 +130,37 @@ def _tag(name: str, text: str) -> str:
     return f"<{name}>\n{text.replace(f'</{name}>', f'&lt;/{name}>')}\n</{name}>"
 
 
+@dataclass
+class Sources:
+    """The chunks shown to the judge as the bot's sources."""
+
+    chunks: list[Chunk]
+    missing: list[str] = field(default_factory=list)  # saved chunk IDs no longer in the index
+    rebuilt: bool = False  # no saved chunk IDs: rebuilt by keyword search, which may differ
+
+
 class Judge:
-    """Grades an answer's behavior with Claude. The sources it shows the judge are the ones /chat
-    gives the bot: the same retriever and k, formatted by the same prompt builder."""
+    """Grades an answer's behavior with Claude, against the chunks /chat gave the bot: the IDs a
+    full run saved, in order, formatted by the same prompt builder. Without saved IDs (an older
+    run, or --calibrate), the chunks are rebuilt with the retriever and k, in keyword order, which
+    can differ from what the reranker gave the bot."""
 
     def __init__(self, client: ClaudeClient, retriever: Retriever, k: int):
         self.client = client
         self.retriever = retriever
         self.k = k
 
-    def messages(self, question: str, behavior: str, expected_answer: str, answer: str):
-        chunks = [r.chunk for r in self.retriever.search(question, self.k)]
+    def sources(self, question: str, chunk_ids: list[str] | None = None) -> Sources:
+        if chunk_ids is None:
+            return Sources([r.chunk for r in self.retriever.search(question, self.k)], rebuilt=True)
+        # The local retrievers keep every chunk; one that doesn't finds none of the IDs.
+        indexed = {c.chunk_id: c for c in getattr(self.retriever, "chunks", [])}
+        return Sources(
+            [indexed[i] for i in chunk_ids if i in indexed],
+            [i for i in chunk_ids if i not in indexed],
+        )
+
+    def messages(self, question: str, behavior: str, expected_answer: str, answer: str, chunks):
         given = build_prompt(question, chunks).messages[0]["content"]
         content = "\n\n".join(
             [
@@ -151,10 +172,19 @@ class Judge:
         )
         return [{"role": "user", "content": content}]
 
-    def grade(self, question: str, behavior: str, expected_answer: str, answer: str) -> Verdict:
-        """The judge's verdict. A failed call or an unreadable reply is a judge error (passed is
-        None), which the eval counts as a failure."""
-        messages = self.messages(question, behavior, expected_answer, answer)
+    def grade(
+        self,
+        question: str,
+        behavior: str,
+        expected_answer: str,
+        answer: str,
+        sources: Sources | None = None,
+    ) -> Verdict:
+        """The judge's verdict, against these sources (default: rebuilt by keyword search). A
+        failed call or an unreadable reply is a judge error (passed is None), which the eval
+        counts as a failure."""
+        sources = sources or self.sources(question)
+        messages = self.messages(question, behavior, expected_answer, answer, sources.chunks)
         try:
             reply = self.client.complete(SYSTEM, messages)
             return parse_verdict(reply.text)

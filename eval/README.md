@@ -75,9 +75,29 @@ Phrase checks are the default grader. When one fails:
    If the judge also fails it, or passes it for a reason that's wrong, treat the failure as real.
 4. Write the judge's reason, and why it holds up, in the PR.
 
+`--compare` only shows disagreements on behavior. An expected-URL failure is a hard rule that
+both graders fail, so for one of those, read the judge's reason on that case too, and check it
+against the answer and the chunks the bot was given (`chunk_ids` in the saved result).
+
 Never loosen a check to turn a wrong or guessed answer into a pass. When the answer is right
 because the site changed (a page now covers a former gap), move the case to the category that is
 now correct and update [the known content gaps](../ingestion/README.md#known-content-gaps).
+
+### Reading results with reranking
+
+`/chat` reranks keyword candidates with Claude (#66), and the reranker doesn't always pick the
+same chunks for the same question. So the bot can answer correctly from a different page than
+last run (the undergraduate admissions page instead of Admissions Resources, a hall's own page
+instead of the comparison matrix), and a source check can pass in one run and fail in the next.
+A small range across runs, for example 36 to 39 of 39, is normal and isn't a regression.
+
+The real warning signs are:
+
+- the same case failing in two consecutive runs
+- any answer that is factually wrong, or states something its sources don't support, even once
+
+For a single source failure, read the answer and its sources first. Widen the case's
+`source_url` only by the steps above.
 
 ## The Claude grader (optional)
 
@@ -97,8 +117,12 @@ a failed judge call, is a **judge error** and counts as a failure, never a pass.
 - `JUDGE_MODEL` picks the judge's model (blank: `CLAUDE_MODEL`). No temperature is sent: the
   client doesn't take one, and Claude 5 models reject sampling parameters. So the judge can
   differ from run to run on borderline answers; read its reasons.
-- The sources the judge sees are rebuilt with the current retriever and the run's `k`. For an
-  old saved run, re-ingesting since then can change them.
+- The judge sees the chunks `/chat` gave the bot after reranking, in the same order. A full run
+  saves their IDs with each result (`chunk_ids`), and `--judge` and `--compare` look them up in
+  the current index. A saved ID no longer in the index (after re-ingesting) is listed in the
+  output, and the judge sees the rest. Runs saved before #67 have no chunk IDs: `--compare`
+  warns and rebuilds the sources by keyword search with the run's `k`, without reranking, so
+  the judge may see different chunks than the bot did. `--calibrate` always rebuilds them.
 - The judge isn't the default and doesn't decide pass or fail on its own: it is a second opinion
   for phrase-check failures (above). `--judge` turns it on; without it grading is exactly as before.
 
@@ -137,6 +161,7 @@ python -m eval.run --calibrate             # the judge on calibration.csv; repor
   environment or `.env`.
 
 Both modes print a per-case table and an overall score, and save every result (including full
-answers) to `eval/results/<timestamp>-<mode>.json`, which is gitignored. With `--judge`, each
-result also saves the judge's verdict. `--compare` and `--calibrate` only print, and ask before
+answers) to `eval/results/<timestamp>-<mode>.json`, which is gitignored. Full mode also saves
+each result's `chunk_ids`: the chunks `/chat` gave Claude after reranking, in order. With
+`--judge`, each result also saves the judge's verdict. `--compare` and `--calibrate` only print, and ask before
 calling Claude unless `--yes` is passed.

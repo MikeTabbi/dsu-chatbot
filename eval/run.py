@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from api.app.claude_client import ClaudeClient, FakeClaudeClient, get_claude_client
 from api.app.config import settings
-from api.app.exchange_log import NullExchangeLog
+from api.app.exchange_log import Exchange, NullExchangeLog
 from api.app.main import (
     app,
     get_chat_client,
@@ -28,7 +28,7 @@ from api.app.main import (
 from api.app.rate_limit import NoRateLimiter
 from api.app.reranker import ClaudeReranker, Reranker, get_reranker, rerank_or_keyword
 from api.app.retriever import Retriever
-from eval.judge import Judge, Verdict, get_judge_client
+from eval.judge import Judge, Sources, Verdict, get_judge_client
 
 EVAL_DIR = Path(__file__).resolve().parent
 CASES_PATH = EVAL_DIR / "questions.csv"
@@ -163,6 +163,8 @@ class Result:
     failures: list[str] = field(default_factory=list)
     judge: dict | None = None  # with --judge: the judge's verdict ({"passed", "reason"})
     rerank: dict | None = None  # retrieval with --rerank: outcome, latency_ms, tokens
+    # full: the chunks /chat gave Claude after reranking, in order (None: no exchange recorded)
+    chunk_ids: list[str] | None = None
 
 
 def _split(value: str) -> list[str]:
@@ -356,6 +358,17 @@ def run_retrieval(
     return [check_retrieval(c, retriever, k, reranker, candidates) for c in cases]
 
 
+class ChunkIdLog(NullExchangeLog):
+    """Keeps only the chunk IDs /chat records for each request: the chunks it gave Claude, after
+    reranking, in order. Nothing is stored past the run."""
+
+    def __init__(self):
+        self.chunk_ids: dict[str, list[str]] = {}
+
+    def add(self, exchange: Exchange) -> None:
+        self.chunk_ids[exchange.request_id] = exchange.chunk_ids
+
+
 def run_full(
     cases: list[Case],
     client: ClaudeClient,
@@ -369,8 +382,10 @@ def run_full(
     already set on the app are restored after."""
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_chat_client] = lambda: client
-    # Eval questions aren't students', so they stay out of the exchange log and its review.
-    app.dependency_overrides[get_chat_exchange_log] = NullExchangeLog
+    # Eval questions aren't students', so they stay out of the exchange log and its review. The
+    # run keeps only each answer's chunk IDs, so the judge grades against what the bot was given.
+    chunk_log = ChunkIdLog()
+    app.dependency_overrides[get_chat_exchange_log] = lambda: chunk_log
     # Every case comes from this one process, so per-client limits and the daily budget would stop
     # a full run partway through.
     app.dependency_overrides[get_chat_rate_limiter] = NoRateLimiter
@@ -388,12 +403,19 @@ def run_full(
             for case in cases:
                 response = http.post("/chat", json={"question": case.question})
                 body = response.json()
+                chunk_ids = chunk_log.chunk_ids.get(body.get("request_id"))
                 verdict = None
                 if judge is not None and response.status_code == 200:
                     verdict = judge.grade(
-                        case.question, case.expected_behavior, case.expected_answer, body["answer"]
+                        case.question,
+                        case.expected_behavior,
+                        case.expected_answer,
+                        body["answer"],
+                        judge.sources(case.question, chunk_ids),
                     )
-                results.append(check_answer(case, response.status_code, body, verdict))
+                result = check_answer(case, response.status_code, body, verdict)
+                result.chunk_ids = chunk_ids
+                results.append(result)
             return results
     finally:
         app.dependency_overrides.clear()
@@ -475,9 +497,9 @@ def print_full(results: list[Result]) -> None:
 
 
 def _saved(result: Result) -> dict:
-    """The result as saved; the judge key only appears when a judge graded it."""
+    """The result as saved; the judge, rerank, and chunk_ids keys only appear when set."""
     data = asdict(result)
-    for key in ("judge", "rerank"):
+    for key in ("judge", "rerank", "chunk_ids"):
         if data[key] is None:
             del data[key]
     return data
@@ -576,6 +598,7 @@ def print_calibration(rows: list[tuple[Labeled, Verdict]]) -> bool:
 class Comparison:
     rules: Result  # graded by the phrase checks
     judged: Result  # graded by the hard rules and the judge
+    sources: Sources | None = None  # what the judge was shown (None: not judged)
 
 
 def latest_full_run(out_dir: Path = RESULTS_DIR) -> Path:
@@ -596,15 +619,18 @@ def compare(saved: dict, cases: list[Case], judge: Judge) -> tuple[list[Comparis
             skipped.append(r["question"])
             continue
         body = {"answer": r["answer"], "sources": [{"url": u} for u in r["source_urls"]]}
-        verdict = None
+        verdict = sources = None
         if r["status"] == 200:
+            # The chunks the bot was given, as the run saved them; runs before #67 have none.
+            sources = judge.sources(case.question, r.get("chunk_ids"))
             verdict = judge.grade(
-                case.question, case.expected_behavior, case.expected_answer, r["answer"]
+                case.question, case.expected_behavior, case.expected_answer, r["answer"], sources
             )
         comparisons.append(
             Comparison(
                 check_answer(case, r["status"], body),
                 check_answer(case, r["status"], body, verdict),
+                sources,
             )
         )
     return comparisons, skipped
@@ -621,6 +647,19 @@ def print_compare(comparisons: list[Comparison], skipped: list[str]) -> None:
     judged = sum(bool(c.judged.passed) for c in comparisons)
     n = len(comparisons)
     differ = [(i, c) for i, c in enumerate(comparisons, 1) if c.rules.passed != c.judged.passed]
+    rebuilt = [i for i, c in enumerate(comparisons, 1) if c.sources and c.sources.rebuilt]
+    missing = [(i, c) for i, c in enumerate(comparisons, 1) if c.sources and c.sources.missing]
+    if rebuilt:
+        print(
+            f"WARNING: {len(rebuilt)} saved answer(s) have no chunk IDs (a run from before #67). "
+            "The judge sees their sources rebuilt by keyword search, without reranking, which may "
+            "differ from what the bot was given.\n"
+        )
+    if missing:
+        print("WARNING: saved chunk IDs no longer in the index; the judge saw the rest:")
+        for i, c in missing:
+            print(f"{i:>2}. {c.rules.question}: {', '.join(c.sources.missing)}")
+        print()
     print(f"Phrase checks: {rules}/{n} passed. Judge: {judged}/{n} passed.")
     if skipped:
         print(f"Skipped {len(skipped)} saved answer(s) whose question isn't in the eval set.")
@@ -726,7 +765,8 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
                 latest_full_run(args.out) if args.compare == "latest" else Path(args.compare)
             )
             saved = json.loads(saved_path.read_text(encoding="utf-8"))
-        # The judge sees the chunks /chat gave the bot: the same retriever and k.
+        # The judge sees the chunks /chat gave the bot, by their saved IDs. The retriever and k
+        # rebuild them only for runs saved without IDs, and for --calibrate.
         judge = Judge(judge_client, retriever, saved.get("k", args.k) if saved else args.k)
 
         if args.compare or args.calibrate:
