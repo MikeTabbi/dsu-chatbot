@@ -4,7 +4,9 @@ import pytest
 
 from api.app.claude_client import ClaudeError, FakeClaudeClient
 from api.app.config import Settings
+from api.app.main import app, get_chat_reranker, get_chat_retriever
 from api.app.prompt import load_system_prompt
+from api.app.reranker import FakeReranker
 from eval import run
 from eval.judge import (
     ALLOWED_REFERRALS,
@@ -24,7 +26,7 @@ from eval.run import (
     main,
     run_full,
 )
-from eval.tests.test_run import MATRIX, case, ok
+from eval.tests.test_run import MATRIX, EveryChunkRetriever, case, ok
 
 PASS = '{"verdict": "pass", "reason": "It declines and offers DSU help."}'
 FAIL = '{"verdict": "fail", "reason": "It writes the poem."}'
@@ -255,13 +257,18 @@ def test_cli_full_mode_with_judge_saves_verdicts(patched, cases_csv, tmp_path, f
     assert len(fake_judge.calls) == len(judged)
 
 
-def saved_run(tmp_path, answers):
-    """A saved full run of the test CSV's cases with these answers (no sources cited)."""
+def saved_run(tmp_path, answers, chunk_ids=None):
+    """A saved full run of the test CSV's cases with these answers (no sources cited). With
+    chunk_ids, each result saves them as the chunks the bot was given; without, it's a run from
+    before chunk IDs were saved."""
     questions = [c.question for c in load_cases(tmp_path / "questions.csv")]
     results = [
         {"question": q, "status": 200, "answer": a, "source_urls": []}
         for q, a in zip(questions, answers, strict=False)
     ]
+    if chunk_ids is not None:
+        for r in results:
+            r["chunk_ids"] = chunk_ids
     path = tmp_path / "20260101-000000-full.json"
     path.write_text(json.dumps({"mode": "full", "k": 2, "results": results}))
     return path
@@ -305,6 +312,80 @@ def test_compare_with_a_real_judge_asks_first(patched, cases_csv, tmp_path, monk
     path = saved_run(tmp_path, ["Wynder Tower."])
     assert main(["--compare", str(path), "--cases", str(cases_csv)], ask=lambda p: "n") == 1
     assert "The judge will grade 1 answer(s)" in capsys.readouterr().out
+
+
+# The judge's sources: the chunks the bot was given after reranking
+
+
+def given(call):
+    """The sources part of the judge's prompt in one recorded call."""
+    content = call[1][0]["content"]
+    return content[content.index("<assistant_was_given>") : content.index("<assistant_answer>")]
+
+
+def test_full_run_saves_the_reranked_chunk_ids_and_judges_against_them(
+    patched, cases_csv, retriever, fake_judge
+):
+    # Keyword order is c0, c1, c2...; the reranker gives the bot step 7, then the matrix.
+    results = run_full(
+        load_cases(cases_csv),
+        FakeClaudeClient(answer="I can only help with DSU questions."),
+        EveryChunkRetriever(),
+        k=2,
+        judge=Judge(fake_judge, retriever, k=2),
+        reranker=FakeReranker([7, 0]),
+    )
+    assert [r.chunk_ids for r in results] == [["c7", "c0"]] * 4
+    for call in fake_judge.calls:
+        sources = given(call)
+        assert sources.index("Step 7.") < sources.index("Carpeted rooms: Wynder Tower.")
+        assert "Pick a meal plan" not in sources  # keyword order's second chunk
+
+
+def test_cli_full_run_saves_chunk_ids_in_results(patched, cases_csv, tmp_path):
+    app.dependency_overrides[get_chat_retriever] = EveryChunkRetriever
+    app.dependency_overrides[get_chat_reranker] = lambda: FakeReranker([3, 1])
+    args = ["--full", "--client", "fake", "-k", "2", "--cases", str(cases_csv)]
+    assert main([*args, "--out", str(tmp_path)]) == 0
+    [saved] = tmp_path.glob("*-full.json")
+    results = json.loads(saved.read_text())["results"]
+    assert [r["chunk_ids"] for r in results] == [["c3", "c1"]] * 4
+
+
+def test_compare_judges_against_the_saved_chunk_ids_in_order(
+    patched, cases_csv, tmp_path, fake_judge, capsys
+):
+    path = saved_run(tmp_path, ["Wynder Tower."], chunk_ids=["c3", "c0"])
+    assert main(["--compare", str(path), "--client", "fake", "--cases", str(cases_csv)]) == 0
+    [call] = fake_judge.calls
+    sources = given(call)
+    # not keyword search's order for "Which dorms have carpeted rooms?", which puts c0 first
+    assert sources.index("Step 3.") < sources.index("Carpeted rooms: Wynder Tower.")
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_compare_on_a_run_without_chunk_ids_rebuilds_them_and_warns(
+    patched, cases_csv, tmp_path, fake_judge, capsys
+):
+    path = saved_run(tmp_path, ["Wynder Tower."])
+    assert main(["--compare", str(path), "--client", "fake", "--cases", str(cases_csv)]) == 0
+    printed = capsys.readouterr().out
+    assert "WARNING: 1 saved answer(s) have no chunk IDs" in printed
+    assert "may differ from what the bot was given" in printed
+    # today's rebuild: keyword search for the question
+    assert "Carpeted rooms: Wynder Tower." in given(fake_judge.calls[0])
+
+
+def test_compare_reports_saved_chunk_ids_no_longer_in_the_index(
+    patched, cases_csv, tmp_path, fake_judge, capsys
+):
+    path = saved_run(tmp_path, ["Wynder Tower."], chunk_ids=["c0", "gone1", "c2", "gone2"])
+    assert main(["--compare", str(path), "--client", "fake", "--cases", str(cases_csv)]) == 0
+    printed = capsys.readouterr().out
+    assert "WARNING: saved chunk IDs no longer in the index; the judge saw the rest:" in printed
+    assert " 1. Which dorms have carpeted rooms?: gone1, gone2" in printed
+    sources = given(fake_judge.calls[0])
+    assert sources.index("Carpeted rooms") < sources.index("Step 2.")
 
 
 CALIBRATION_HEADER = "question,label,answer,note\n"
