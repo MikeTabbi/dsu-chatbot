@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     retriever_min_score: float = 0.1
     synonyms_file: str = "api/app/synonyms.yaml"  # word groups for the local retriever
     chat_top_k: int = 5  # chunks retrieved per question and passed to Claude
+    # Reranking (api/app/reranker.py): keyword search returns reranker_candidates chunks and a
+    # cheap model picks the chat_top_k best. Each rerank counts toward the daily Claude budget.
+    reranker: str = "claude"  # claude (fake reranker when CLAUDE_CLIENT=fake) | none
+    reranker_model: str = "claude-haiku-4-5-20251001"
+    reranker_candidates: int = 40
+    reranker_timeout_seconds: float = 5.0  # no retry: past this, /chat keeps keyword order
     chat_max_question_chars: int = 1000
     # Sites allowed to call the API from a browser (the widget), comma-separated. The default is
     # the local demo page (widget/README.md); production lists DSU's site. "*" is refused.

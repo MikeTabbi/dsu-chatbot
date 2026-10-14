@@ -113,6 +113,7 @@ instructions or model: it should pass every correct answer and fail every bad on
 ```bash
 python -m eval.run                         # retrieval only: no Claude calls, free
 python -m eval.run -k 3 --category answer  # top 3 chunks, answer cases only
+python -m eval.run --rerank                # retrieval with the reranker (calls RERANKER_MODEL)
 python -m eval.run --full                  # real answers through /chat; asks before calling Claude
 python -m eval.run --full --yes            # no prompt (e.g. in a script)
 python -m eval.run --full --client fake    # dry run of the full path with the fake client
@@ -124,7 +125,9 @@ python -m eval.run --calibrate             # the judge on calibration.csv; repor
 
 - **Retrieval only** searches each question with the configured retriever and reports whether an
   expected URL is in the top `k` chunks (default `CHAT_TOP_K`) and at what rank. Cases without
-  expected URLs show `-`.
+  expected URLs show `-`. With `--rerank`, the top `k` are picked from `RERANKER_CANDIDATES` by
+  the reranker, as `/chat` does, and it also prints how many reranks fell back to keyword order,
+  their latency, and their tokens. Full mode always reranks as `/chat` does (`RERANKER`).
 - **Full** posts each question to `/chat` in-process (FastAPI's `TestClient`, no server needed),
   so it runs the same validation, retrieval, prompt, and Claude call as the real endpoint. It
   grades the answer on HTTP status, the expected behavior, and the phrases. The `src` column shows

@@ -105,3 +105,937 @@ sources:
     topic: accounts
     change_frequency: medium
     notes: Tuition and fees. Account holds are personal data; point students to the right office.
+
+  # Added from discovery (python -m ingestion.approve)
+  - url: https://business.desu.edu
+    topic: academics
+    change_frequency: slow
+    notes: College of Business at Delaware State.
+  - url: https://business.desu.edu/departments
+    topic: academics
+    change_frequency: slow
+    notes: Departments.
+  - url: https://business.desu.edu/departments/accounting-economics-finance
+    topic: academics
+    change_frequency: slow
+    notes: Accounting, Economics and Finance.
+  - url: https://business.desu.edu/departments/business-administration
+    topic: academics
+    change_frequency: slow
+    notes: Business Administration.
+  - url: https://business.desu.edu/departments/hospitality-tourism-management
+    topic: academics
+    change_frequency: slow
+    notes: Hospitality and Tourism Management.
+  - url: https://business.desu.edu/departments/sport-management
+    topic: academics
+    change_frequency: slow
+    notes: Sport Management.
+  - url: https://business.desu.edu/programs
+    topic: academics
+    change_frequency: slow
+    notes: Programs.
+  - url: https://business.desu.edu/programs/graduate-programs/master-business-administration-mba
+    topic: academics
+    change_frequency: slow
+    notes: Master of Business Administration, MBA.
+  - url: https://cast.desu.edu
+    topic: academics
+    change_frequency: slow
+    notes: College of Agriculture, Science, & Technology at Delaware State.
+  - url: https://cast.desu.edu/about/contact-us
+    topic: academics
+    change_frequency: slow
+    notes: Contact Us.
+  - url: https://cast.desu.edu/departments
+    topic: academics
+    change_frequency: slow
+    notes: Departments.
+  - url: https://cast.desu.edu/departments/agriculture-food-environmental-sciences
+    topic: academics
+    change_frequency: slow
+    notes: Agriculture, Food, and Environmental Sciences.
+  - url: https://cast.desu.edu/departments/biological-sciences
+    topic: academics
+    change_frequency: slow
+    notes: Department of Biological Sciences.
+  - url: https://cast.desu.edu/departments/chemistry
+    topic: academics
+    change_frequency: slow
+    notes: Department of Chemistry.
+  - url: https://cast.desu.edu/departments/computer-information-sciences
+    topic: academics
+    change_frequency: slow
+    notes: Computer Science.
+  - url: https://cast.desu.edu/departments/division-physics-engineering-mathematics-computer-science
+    topic: academics
+    change_frequency: slow
+    notes: Division of Physics, Engineering, Mathematics, and Computer Science.
+  - url: https://cast.desu.edu/departments/mathematical-sciences
+    topic: academics
+    change_frequency: slow
+    notes: Mathematical Sciences.
+  - url: https://cast.desu.edu/departments/physics-engineering
+    topic: academics
+    change_frequency: slow
+    notes: Physics and Engineering.
+  - url: https://cast.desu.edu/programs
+    topic: academics
+    change_frequency: slow
+    notes: Programs.
+  - url: https://chess.desu.edu
+    topic: academics
+    change_frequency: slow
+    notes: College of Humanities, Education and Social Sciences at Delaware State.
+  - url: https://chess.desu.edu/departments
+    topic: academics
+    change_frequency: slow
+    notes: Departments.
+  - url: https://chess.desu.edu/departments/education
+    topic: academics
+    change_frequency: slow
+    notes: Department of Education.
+  - url: https://chess.desu.edu/departments/history-political-science-philosophy-law-studies
+    topic: academics
+    change_frequency: slow
+    notes: History, Political Science, Philosophy and Law Studies.
+  - url: https://chess.desu.edu/departments/languages-literatures
+    topic: academics
+    change_frequency: slow
+    notes: Languages and Literatures.
+  - url: https://chess.desu.edu/departments/mass-communications-visual-performing-arts
+    topic: academics
+    change_frequency: slow
+    notes: Mass Communications, Visual and Performing Arts.
+  - url: https://chess.desu.edu/departments/master-public-administration-mpa
+    topic: academics
+    change_frequency: slow
+    notes: Master of Public Administration (MPA).
+  - url: https://chess.desu.edu/departments/sociology-criminal-justice
+    topic: academics
+    change_frequency: slow
+    notes: Sociology and Criminal Justice.
+  - url: https://chess.desu.edu/programs
+    topic: academics
+    change_frequency: slow
+    notes: Programs.
+  - url: https://chess.desu.edu/programs/liberal-studies-ba
+    topic: academics
+    change_frequency: slow
+    notes: Liberal Studies, BA.
+  - url: https://sgaes.desu.edu
+    topic: academics
+    change_frequency: slow
+    notes: School of Graduate, Adult and Extended Studies at Delaware State University.
+  - url: https://sgaes.desu.edu/about/dsu-wilmington/contacts-directions
+    topic: academics
+    change_frequency: slow
+    notes: Contacts and Directions.
+  - url: https://wchbs.desu.edu
+    topic: academics
+    change_frequency: slow
+    notes: Wesley College of Health & Behavioral Sciences at Delaware State.
+  - url: https://wchbs.desu.edu/about/contact-us
+    topic: academics
+    change_frequency: slow
+    notes: Contact Us.
+  - url: https://wchbs.desu.edu/departments
+    topic: academics
+    change_frequency: slow
+    notes: Departments.
+  - url: https://wchbs.desu.edu/departments/nursing
+    topic: academics
+    change_frequency: slow
+    notes: Nursing.
+  - url: https://wchbs.desu.edu/departments/psychology
+    topic: academics
+    change_frequency: slow
+    notes: Psychology.
+  - url: https://wchbs.desu.edu/departments/public-allied-health-sciences
+    topic: academics
+    change_frequency: slow
+    notes: Public and Allied Health Sciences.
+  - url: https://wchbs.desu.edu/departments/social-work
+    topic: academics
+    change_frequency: slow
+    notes: Social Work.
+  - url: https://wchbs.desu.edu/programs
+    topic: academics
+    change_frequency: slow
+    notes: Programs.
+  - url: https://www.desu.edu
+    topic: academics
+    change_frequency: slow
+    notes: Delaware State.
+  - url: https://www.desu.edu/academics
+    topic: academics
+    change_frequency: slow
+    notes: Academics.
+  - url: https://www.desu.edu/academics/adultcontinuing-education
+    topic: academics
+    change_frequency: slow
+    notes: Adult/Continuing Education.
+  - url: https://www.desu.edu/academics/adultcontinuing-education/testing-services/clep-exams-credits
+    topic: academics
+    change_frequency: slow
+    notes: CLEP Exams & Credits.
+  - url: https://www.desu.edu/academics/credit-prior-learning
+    topic: academics
+    change_frequency: slow
+    notes: Credit for Prior Learning.
+  - url: https://www.desu.edu/academics/dsu-online
+    topic: academics
+    change_frequency: slow
+    notes: DSU Online.
+  - url: https://www.desu.edu/academics/dsu-online/never-too-late/near-completer-student-debt-forgiveness-program
+    topic: academics
+    change_frequency: slow
+    notes: Near Completer Student Debt Forgiveness Program.
+  - url: https://www.desu.edu/academics/honors-program
+    topic: academics
+    change_frequency: slow
+    notes: Honors Program.
+  - url: https://www.desu.edu/academics/honors-program/admission-criteria
+    topic: academics
+    change_frequency: slow
+    notes: Admission Criteria.
+  - url: https://www.desu.edu/academics/honors-program/honors-program-curriculum
+    topic: academics
+    change_frequency: slow
+    notes: Honors Program Curriculum.
+  - url: https://www.desu.edu/academics/international-programs
+    topic: academics
+    change_frequency: slow
+    notes: International Programs.
+  - url: https://www.desu.edu/academics/international-programs/prospective-international-students
+    topic: academics
+    change_frequency: slow
+    notes: Prospective International Students.
+  - url: https://sgaes.desu.edu/admissions
+    topic: admissions
+    change_frequency: medium
+    notes: Graduate Admissions.
+  - url: https://sgaes.desu.edu/graduate-admissions/graduate-admission-status
+    topic: admissions
+    change_frequency: medium
+    notes: Graduate Admission Status.
+  - url: https://sgaes.desu.edu/graduate-admissions/graduate-program-directory
+    topic: admissions
+    change_frequency: medium
+    notes: Graduate Program Directory.
+  - url: https://sgaes.desu.edu/graduate-admissions/new-graduate-students-next-steps
+    topic: admissions
+    change_frequency: medium
+    notes: "New Graduate Students: Next Steps."
+  - url: https://sgaes.desu.edu/graduate-programming-student-success
+    topic: admissions
+    change_frequency: medium
+    notes: Graduate Programming and Student Success.
+  - url: https://sgaes.desu.edu/graduate-programming-student-success/graduate-admissions-important-deadlines
+    topic: admissions
+    change_frequency: medium
+    notes: Graduate Admissions – Important Deadlines.
+  - url: https://sgaes.desu.edu/graduate-programming-student-success/graduate-student-association
+    topic: admissions
+    change_frequency: medium
+    notes: Graduate Student Association.
+  - url: https://sgaes.desu.edu/graduate-programming-student-success/matriculation-processes
+    topic: admissions
+    change_frequency: medium
+    notes: Matriculation Processes.
+  - url: https://www.desu.edu/admissions/other-admissions-types
+    topic: admissions
+    change_frequency: medium
+    notes: Other Admissions Types.
+  - url: https://www.desu.edu/admissions/other-admissions-types/academic-regulations
+    topic: admissions
+    change_frequency: medium
+    notes: Academic Regulations.
+  - url: https://www.desu.edu/admissions/other-admissions-types/dover-air-force-base
+    topic: admissions
+    change_frequency: medium
+    notes: Dover Air Force Base.
+  - url: https://www.desu.edu/admissions/other-admissions-types/dtcc-connected-degree-program
+    topic: admissions
+    change_frequency: medium
+    notes: DTCC Connected Degree Program.
+  - url: https://www.desu.edu/admissions/other-admissions-types/dual-enrollment-program
+    topic: admissions
+    change_frequency: medium
+    notes: Dual Enrollment Program.
+  - url: https://www.desu.edu/admissions/other-admissions-types/international-students
+    topic: admissions
+    change_frequency: medium
+    notes: International Students.
+  - url: https://www.desu.edu/admissions/other-admissions-types/militaryveteran-students
+    topic: admissions
+    change_frequency: medium
+    notes: Military/Veteran Students.
+  - url: https://www.desu.edu/admissions/other-admissions-types/militaryveteran-students/veterans-affairs-educational-programs
+    topic: admissions
+    change_frequency: medium
+    notes: Veterans Affairs Educational Programs FAQs.
+  - url: https://www.desu.edu/admissions/other-admissions-types/returning-students
+    topic: admissions
+    change_frequency: medium
+    notes: Returning Students.
+  - url: https://www.desu.edu/admissions/other-admissions-types/transfer-student-admissions
+    topic: admissions
+    change_frequency: medium
+    notes: Transfer Student Admissions.
+  - url: https://www.desu.edu/admissions/undergraduate-students
+    topic: admissions
+    change_frequency: medium
+    notes: Undergraduate Students.
+  - url: https://www.desu.edu/admissions/undergraduate-students/accepted-students
+    topic: admissions
+    change_frequency: medium
+    notes: Accepted Students.
+  - url: https://www.desu.edu/admissions/undergraduate-students/accepted-students/new-student-information
+    topic: admissions
+    change_frequency: medium
+    notes: New Student Information.
+  - url: https://www.desu.edu/admissions/undergraduate-students/accepted-students/new-student-orientation
+    topic: admissions
+    change_frequency: medium
+    notes: New Student Orientation.
+  - url: https://www.desu.edu/admissions/undergraduate-students/accepted-students/summer-jumpstart-virtual
+    topic: admissions
+    change_frequency: medium
+    notes: Summer Jumpstart [Virtual].
+  - url: https://www.desu.edu/admissions/visit-dsu
+    topic: admissions
+    change_frequency: medium
+    notes: Visit DSU.
+  - url: https://www.desu.edu/admissions/visit-dsu/directions-dsu
+    topic: admissions
+    change_frequency: medium
+    notes: Directions to DSU.
+  - url: https://www.desu.edu/admissions/visit-dsu/schedule-campus-tour
+    topic: admissions
+    change_frequency: medium
+    notes: Schedule a Campus Tour.
+  - url: https://www.desu.edu/academics/student-success/academic-advisement
+    topic: advising
+    change_frequency: medium
+    notes: Academic Advisement.
+  - url: https://www.desu.edu/academics/student-success/academic-advisement/advisement-faqs-resources
+    topic: advising
+    change_frequency: medium
+    notes: Advisement FAQs and Resources.
+  - url: https://www.desu.edu/about/dsu-alerts
+    topic: campus
+    change_frequency: medium
+    notes: DSU Alerts.
+  - url: https://www.desu.edu/about/glance
+    topic: campus
+    change_frequency: medium
+    notes: At a Glance.
+  - url: https://www.desu.edu/about/police-department
+    topic: campus
+    change_frequency: medium
+    notes: Police Department.
+  - url: https://www.desu.edu/about/police-department/contact-police-dept
+    topic: campus
+    change_frequency: medium
+    notes: Contact Police Dept.
+  - url: https://www.desu.edu/about/police-department/emergency-alerts
+    topic: campus
+    change_frequency: medium
+    notes: Emergency Alerts.
+  - url: https://www.desu.edu/about/police-department/parking
+    topic: campus
+    change_frequency: medium
+    notes: Parking.
+  - url: https://www.desu.edu/about/police-department/safety-corner
+    topic: campus
+    change_frequency: medium
+    notes: Safety Corner.
+  - url: https://business.desu.edu/students/business-careers
+    topic: career
+    change_frequency: medium
+    notes: Business Careers.
+  - url: https://business.desu.edu/students/internships
+    topic: career
+    change_frequency: medium
+    notes: Internships.
+  - url: https://www.desu.edu/student-life/career-services
+    topic: career
+    change_frequency: medium
+    notes: Career Services.
+  - url: https://www.desu.edu/student-life/career-services/events-workshops
+    topic: career
+    change_frequency: medium
+    notes: Events & Workshops.
+  - url: https://www.desu.edu/student-life/career-services/student-services
+    topic: career
+    change_frequency: medium
+    notes: Student Services.
+  - url: https://www.desu.edu/student-life/career-services/student-services/career-assessment
+    topic: career
+    change_frequency: medium
+    notes: Career Assessment.
+  - url: https://www.desu.edu/student-life/career-services/student-services/hornet-career-roadmap
+    topic: career
+    change_frequency: medium
+    notes: Hornet Career Roadmap.
+  - url: https://www.desu.edu/student-life/student-employment
+    topic: career
+    change_frequency: medium
+    notes: Student Employment.
+  - url: https://cast.desu.edu/students/scholarships
+    topic: financial-aid
+    change_frequency: medium
+    notes: Scholarships.
+  - url: https://sgaes.desu.edu/graduate-admissions/financial-aid-guidelines
+    topic: financial-aid
+    change_frequency: medium
+    notes: Financial Aid Guidelines.
+  - url: https://www.desu.edu/admissions/financial-aid
+    topic: financial-aid
+    change_frequency: medium
+    notes: Financial Aid.
+  - url: https://www.desu.edu/admissions/financial-aid/applying-aid
+    topic: financial-aid
+    change_frequency: medium
+    notes: Applying for Aid.
+  - url: https://www.desu.edu/admissions/financial-aid/applying-aid/federal-verification
+    topic: financial-aid
+    change_frequency: medium
+    notes: Federal Verification.
+  - url: https://www.desu.edu/admissions/financial-aid/applying-aid/helpful-hints
+    topic: financial-aid
+    change_frequency: medium
+    notes: Helpful Hints.
+  - url: https://www.desu.edu/admissions/financial-aid/applying-aid/step-step-process
+    topic: financial-aid
+    change_frequency: medium
+    notes: Step-by-Step Process.
+  - url: https://www.desu.edu/admissions/financial-aid/applying-aid/summer-aid
+    topic: financial-aid
+    change_frequency: medium
+    notes: Summer Aid.
+  - url: https://www.desu.edu/admissions/financial-aid/cost-attendance
+    topic: financial-aid
+    change_frequency: medium
+    notes: Cost of Attendance.
+  - url: https://www.desu.edu/admissions/financial-aid/current-students
+    topic: financial-aid
+    change_frequency: medium
+    notes: Current Students.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility
+    topic: financial-aid
+    change_frequency: medium
+    notes: Eligibility.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/dependency
+    topic: financial-aid
+    change_frequency: medium
+    notes: Dependency.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/international-student-aid
+    topic: financial-aid
+    change_frequency: medium
+    notes: International Student Aid.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/one-big-beautiful-bill-act-obbba-faqs
+    topic: financial-aid
+    change_frequency: medium
+    notes: One Big Beautiful Bill Act (OBBBA) FAQs.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/satisfactory-academic-progress-sap
+    topic: financial-aid
+    change_frequency: medium
+    notes: Satisfactory Academic Progress (SAP).
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/student-rights-responsibilities
+    topic: financial-aid
+    change_frequency: medium
+    notes: Student Rights and Responsibilities.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/study-abroad
+    topic: financial-aid
+    change_frequency: medium
+    notes: Study Abroad.
+  - url: https://www.desu.edu/admissions/financial-aid/eligibility/withdrawals-repayments-refunds
+    topic: financial-aid
+    change_frequency: medium
+    notes: Withdrawals, Repayments, Refunds.
+  - url: https://www.desu.edu/admissions/financial-aid/fafsa-application
+    topic: financial-aid
+    change_frequency: medium
+    notes: FAFSA Application.
+  - url: https://www.desu.edu/admissions/financial-aid/forms-publications
+    topic: financial-aid
+    change_frequency: medium
+    notes: Forms & Publications.
+  - url: https://www.desu.edu/admissions/financial-aid/receiving-funds/disbursement
+    topic: financial-aid
+    change_frequency: medium
+    notes: Disbursement.
+  - url: https://www.desu.edu/admissions/financial-aid/receiving-funds/financial-aid-offer
+    topic: financial-aid
+    change_frequency: medium
+    notes: Financial Aid Offer.
+  - url: https://www.desu.edu/admissions/financial-aid/resources
+    topic: financial-aid
+    change_frequency: medium
+    notes: Resources.
+  - url: https://www.desu.edu/admissions/financial-aid/resources/contact-financial-aid
+    topic: financial-aid
+    change_frequency: medium
+    notes: Contact Financial Aid.
+  - url: https://www.desu.edu/admissions/financial-aid/resources/financial-aid-faqs
+    topic: financial-aid
+    change_frequency: medium
+    notes: Financial Aid FAQs.
+  - url: https://www.desu.edu/admissions/financial-aid/scholarships
+    topic: financial-aid
+    change_frequency: medium
+    notes: Scholarships.
+  - url: https://www.desu.edu/admissions/financial-aid/scholarships/delaware-state-scholarships
+    topic: financial-aid
+    change_frequency: medium
+    notes: Delaware State Scholarships.
+  - url: https://www.desu.edu/admissions/financial-aid/scholarships/out-state-freshman
+    topic: financial-aid
+    change_frequency: medium
+    notes: Out-of-State Freshman.
+  - url: https://www.desu.edu/admissions/financial-aid/scholarships/returning-student
+    topic: financial-aid
+    change_frequency: medium
+    notes: Returning Student.
+  - url: https://www.desu.edu/admissions/financial-aid/scholarships/state-freshman
+    topic: financial-aid
+    change_frequency: medium
+    notes: In-State Freshman.
+  - url: https://www.desu.edu/admissions/financial-aid/tuition-fees/hornet-textbook-access
+    topic: financial-aid
+    change_frequency: medium
+    notes: Hornet Textbook Access.
+  - url: https://www.desu.edu/admissions/financial-aid/tuition-fees/payment-plan-guidelines
+    topic: financial-aid
+    change_frequency: medium
+    notes: Payment Plan Guidelines.
+  - url: https://www.desu.edu/admissions/financial-aid/tuition-fees/student-health-insurance
+    topic: financial-aid
+    change_frequency: medium
+    notes: Student Health Insurance.
+  - url: https://www.desu.edu/admissions/financial-aid/types-sources
+    topic: financial-aid
+    change_frequency: medium
+    notes: Types and Sources.
+  - url: https://www.desu.edu/admissions/financial-aid/types-sources/grants
+    topic: financial-aid
+    change_frequency: medium
+    notes: Grants.
+  - url: https://www.desu.edu/admissions/financial-aid/types-sources/loans
+    topic: financial-aid
+    change_frequency: medium
+    notes: Loans.
+  - url: https://www.desu.edu/admissions/financial-aid/types-sources/loans/plus-loans
+    topic: financial-aid
+    change_frequency: medium
+    notes: PLUS Loans.
+  - url: https://www.desu.edu/admissions/financial-aid/types-sources/scholarships-awards
+    topic: financial-aid
+    change_frequency: medium
+    notes: Scholarships and Awards.
+  - url: https://www.desu.edu/admissions/financial-aid/types-sources/work-study-employment
+    topic: financial-aid
+    change_frequency: medium
+    notes: Work-Study Employment.
+  - url: https://www.desu.edu/admissions/tuition-financial-aid/receiving-funds
+    topic: financial-aid
+    change_frequency: medium
+    notes: Receiving Funds.
+  - url: https://www.desu.edu/admissions/tuition-financial-aid/receiving-funds/refunds
+    topic: financial-aid
+    change_frequency: medium
+    notes: Refunds.
+  - url: https://www.desu.edu/admissions/tuition-financial-aid/university-billing-schedule
+    topic: financial-aid
+    change_frequency: medium
+    notes: University Billing.
+  - url: https://www.desu.edu/student-life/campus-health-services
+    topic: health
+    change_frequency: medium
+    notes: Campus Health Services.
+  - url: https://www.desu.edu/student-life/campus-health-services/after-hours-care
+    topic: health
+    change_frequency: medium
+    notes: After Hours Care.
+  - url: https://www.desu.edu/student-life/campus-health-services/campus-health-center
+    topic: health
+    change_frequency: medium
+    notes: Campus Health Center.
+  - url: https://www.desu.edu/student-life/campus-health-services/counseling-services
+    topic: health
+    change_frequency: medium
+    notes: Counseling Services.
+  - url: https://www.desu.edu/student-life/campus-health-services/counseling-services/frequently-asked-questions
+    topic: health
+    change_frequency: medium
+    notes: Frequently Asked Questions.
+  - url: https://www.desu.edu/student-life/campus-health-services/counseling-services/peer-programs
+    topic: health
+    change_frequency: medium
+    notes: Peer Programs.
+  - url: https://www.desu.edu/student-life/campus-health-services/pregnancy-resources
+    topic: health
+    change_frequency: medium
+    notes: Pregnancy Resources.
+  - url: https://www.desu.edu/student-life/campus-health-services/prevention-services
+    topic: health
+    change_frequency: medium
+    notes: Prevention Services.
+  - url: https://www.desu.edu/student-life/campus-health-services/tips-maintaining-health-while-school
+    topic: health
+    change_frequency: medium
+    notes: Tips on Maintaining Health While at School.
+  - url: https://www.desu.edu/student-life/student-health-services/counseling-services/psychological-emergencycrisis
+    topic: health
+    change_frequency: medium
+    notes: Psychological Emergency/Crisis.
+  - url: https://www.desu.edu/student-life/housing-dining/apply-housing
+    topic: housing
+    change_frequency: medium
+    notes: New and Returning Students Housing Application.
+  - url: https://www.desu.edu/student-life/housing-dining/apply-housing/maintenance-it-request-laundry
+    topic: housing
+    change_frequency: medium
+    notes: Maintenance, IT Request, and Laundry.
+  - url: https://www.desu.edu/student-life/housing-dining/apply-housing/residential-policies-procedures
+    topic: housing
+    change_frequency: medium
+    notes: Residential Policies and Procedures.
+  - url: https://www.desu.edu/student-life/housing-dining/apply-housing/what-bring-what-not-bring
+    topic: housing
+    change_frequency: medium
+    notes: What to Bring & What Not to Bring.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/gooding-hall
+    topic: housing
+    change_frequency: medium
+    notes: Gooding Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/living-learning-commons
+    topic: housing
+    change_frequency: medium
+    notes: Living and Learning Commons.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/malmberg-hall
+    topic: housing
+    change_frequency: medium
+    notes: Malmberg Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/medgar-w-evers-hall
+    topic: housing
+    change_frequency: medium
+    notes: Medgar W. Evers Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/meta-v-jenkins-hall
+    topic: housing
+    change_frequency: medium
+    notes: Meta V. Jenkins Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/tubman-laws-hall
+    topic: housing
+    change_frequency: medium
+    notes: Tubman-Laws Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/university-courtyard
+    topic: housing
+    change_frequency: medium
+    notes: University Courtyard.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/university-village
+    topic: housing
+    change_frequency: medium
+    notes: University Village.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/w-richard-wynder-tower
+    topic: housing
+    change_frequency: medium
+    notes: W. Richard Wynder Tower.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/warren-franklin-hall
+    topic: housing
+    change_frequency: medium
+    notes: Warren-Franklin Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/williams-hall
+    topic: housing
+    change_frequency: medium
+    notes: Williams Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/residential-halls/zimmerman-hall
+    topic: housing
+    change_frequency: medium
+    notes: Zimmerman Hall.
+  - url: https://www.desu.edu/student-life/housing-dining/roommate-success-guide
+    topic: housing
+    change_frequency: medium
+    notes: Roommate Success Guide.
+  - url: https://www.desu.edu/about/administration/information-technology
+    topic: it-help
+    change_frequency: slow
+    notes: Information Technology.
+  - url: https://www.desu.edu/about/administration/information-technology/login-webmail
+    topic: it-help
+    change_frequency: slow
+    notes: Login to Webmail.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-student-user-guide/mydesu-log
+    topic: registration
+    change_frequency: slow
+    notes: MyDESU - Log in to MyDESU.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/additional-links
+    topic: registration
+    change_frequency: slow
+    notes: Additional Links Included in the Student Profile.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/additional-resources
+    topic: registration
+    change_frequency: slow
+    notes: Additional Resources.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/course-listing
+    topic: registration
+    change_frequency: slow
+    notes: Course Listing Explanation.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/how-drop-class
+    topic: registration
+    change_frequency: slow
+    notes: How to Drop a Class.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/student-profile
+    topic: registration
+    change_frequency: slow
+    notes: Student Profile.
+  - url: https://www.desu.edu/about/administration/information-technology/banner-self-service-9-user-guide/student-services
+    topic: registration
+    change_frequency: slow
+    notes: Student Services.
+  - url: https://www.desu.edu/admissions/records-registration/digital-diplomas
+    topic: registration
+    change_frequency: fast
+    notes: Digital Diplomas.
+  - url: https://www.desu.edu/admissions/records-registration/state-tuition-rate
+    topic: registration
+    change_frequency: fast
+    notes: In-State Tuition Rate.
+  - url: https://www.desu.edu/admissions/records-registration/transcript-policy-update
+    topic: registration
+    change_frequency: fast
+    notes: Transcript Policy Update.
+  - url: https://business.desu.edu/students
+    topic: student-life
+    change_frequency: medium
+    notes: Students.
+  - url: https://cast.desu.edu/students
+    topic: student-life
+    change_frequency: medium
+    notes: Students.
+  - url: https://cast.desu.edu/students/cast-clubs
+    topic: student-life
+    change_frequency: medium
+    notes: CAST Clubs.
+  - url: https://chess.desu.edu/clubs-organizations
+    topic: student-life
+    change_frequency: medium
+    notes: Clubs & Organizations.
+  - url: https://chess.desu.edu/students
+    topic: student-life
+    change_frequency: medium
+    notes: Students.
+  - url: https://wchbs.desu.edu/students
+    topic: student-life
+    change_frequency: medium
+    notes: Students.
+  - url: https://wchbs.desu.edu/students/clubs-organizations
+    topic: student-life
+    change_frequency: medium
+    notes: Clubs & Organizations.
+  - url: https://www.desu.edu/student-life
+    topic: student-life
+    change_frequency: medium
+    notes: Student Life.
+  - url: https://www.desu.edu/student-life/judicial-affairs
+    topic: student-life
+    change_frequency: medium
+    notes: Judicial Affairs.
+  - url: https://www.desu.edu/student-life/safe-space-coalition
+    topic: student-life
+    change_frequency: medium
+    notes: Safe Space Coalition.
+  - url: https://www.desu.edu/student-life/safe-space-coalition/sexual-assault-get-support
+    topic: student-life
+    change_frequency: medium
+    notes: "Sexual Assault: Get Support."
+  - url: https://www.desu.edu/student-life/student-organizations/campus-ministries
+    topic: student-life
+    change_frequency: medium
+    notes: Campus Ministries.
+  - url: https://www.desu.edu/student-life/student-organizations/fraternity-sorority-life
+    topic: student-life
+    change_frequency: medium
+    notes: Fraternity and Sorority Life.
+  - url: https://www.desu.edu/student-life/student-organizations/service-community
+    topic: student-life
+    change_frequency: medium
+    notes: Service and Community.
+  - url: https://www.desu.edu/student-life/student-organizations/special-interest-groups
+    topic: student-life
+    change_frequency: medium
+    notes: Special Interest Groups.
+  - url: https://www.desu.edu/student-life/student-organizations/student-business-organizations
+    topic: student-life
+    change_frequency: medium
+    notes: Student Business Organizations.
+  - url: https://www.desu.edu/student-life/student-organizations/student-government-association
+    topic: student-life
+    change_frequency: medium
+    notes: Student Government Association.
+  - url: https://www.desu.edu/student-life/wellness-recreation
+    topic: student-life
+    change_frequency: medium
+    notes: Wellness & Recreation.
+  - url: https://www.desu.edu/student-life/wellness-recreation/club-sports
+    topic: student-life
+    change_frequency: medium
+    notes: Club Sports.
+  - url: https://www.desu.edu/student-life/wellness-recreation/contact-us-wrc
+    topic: student-life
+    change_frequency: medium
+    notes: Contact WellRec.
+  - url: https://www.desu.edu/student-life/wellness-recreation/facilities
+    topic: student-life
+    change_frequency: medium
+    notes: Facilities.
+  - url: https://www.desu.edu/student-life/wellness-recreation/hornet-fitness/group-fitness
+    topic: student-life
+    change_frequency: medium
+    notes: Group Fitness.
+  - url: https://www.desu.edu/student-life/wellness-recreation/intramural-sports
+    topic: student-life
+    change_frequency: medium
+    notes: Intramural Sports.
+  - url: https://www.desu.edu/student-life/wellness-recreation/wrc-hours
+    topic: student-life
+    change_frequency: fast
+    notes: Hours.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources
+    topic: student-success
+    change_frequency: medium
+    notes: Center for Disability Resources.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities
+    topic: student-success
+    change_frequency: medium
+    notes: Students with Disabilities.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities/cdr-student
+    topic: student-success
+    change_frequency: medium
+    notes: CDR Student FAQs.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities/common
+    topic: student-success
+    change_frequency: medium
+    notes: Common Accommodations.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities/documentation
+    topic: student-success
+    change_frequency: medium
+    notes: Documentation Requirements.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities/renewing
+    topic: student-success
+    change_frequency: medium
+    notes: Renewing Accommodations.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities/requesting
+    topic: student-success
+    change_frequency: medium
+    notes: Requesting Accommodations.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/students-disabilities/service
+    topic: student-success
+    change_frequency: medium
+    notes: Service and Assistance Animals - University Expectations.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/using-accomodate
+    topic: student-success
+    change_frequency: medium
+    notes: Using Accomodate.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/using-accomodate/accommodate-faqs
+    topic: student-success
+    change_frequency: medium
+    notes: Accommodate FAQs.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/using-accomodate/how-login
+    topic: student-success
+    change_frequency: medium
+    notes: How to Login to Accommodate - Current and New Students.
+  - url: https://www.desu.edu/about/administration/general-counsel/center-disability-resources/using-accomodate/using-request
+    topic: student-success
+    change_frequency: medium
+    notes: Using the Request for Accommodations Form in Accommodate.
+  - url: https://www.desu.edu/academics/student-success
+    topic: student-success
+    change_frequency: medium
+    notes: Student Success.
+  - url: https://www.desu.edu/academics/student-success/academic-support-student-athletes
+    topic: student-success
+    change_frequency: medium
+    notes: Academic Support for Student Athletes.
+  - url: https://www.desu.edu/academics/student-success/first-second-year-programs
+    topic: student-success
+    change_frequency: medium
+    notes: First and Second Year Programs.
+  - url: https://www.desu.edu/academics/student-success/integrated-academic-support-services
+    topic: student-success
+    change_frequency: medium
+    notes: Integrated Academic Support Services.
+  - url: https://www.desu.edu/academics/student-success/integrated-academic-support-services/our-services
+    topic: student-success
+    change_frequency: medium
+    notes: Our Services.
+  - url: https://www.desu.edu/academics/student-success/integrated-academic-support-services/our-workshops
+    topic: student-success
+    change_frequency: medium
+    notes: Our Workshops.
+  - url: https://www.desu.edu/academics/student-success/integrated-academic-support-services/tutor-si-schedules
+    topic: student-success
+    change_frequency: medium
+    notes: Tutor And SI Schedules.
+  - url: https://www.desu.edu/academics/student-success/integrated-academic-support-services/writing-resources
+    topic: student-success
+    change_frequency: medium
+    notes: Writing Resources for Students.
+  - url: https://www.desu.edu/academics/student-success/intervention-academic-recovery
+    topic: student-success
+    change_frequency: medium
+    notes: Intervention & Academic Recovery.
+  - url: https://www.desu.edu/academics/student-success/intervention-academic-recovery/academic-recovery-program
+    topic: student-success
+    change_frequency: medium
+    notes: Academic Recovery Program.
+  - url: https://www.desu.edu/academics/student-success/intervention-academic-recovery/peer-academic-coaches
+    topic: student-success
+    change_frequency: medium
+    notes: Peer Academic Coaches.
+  - url: https://www.desu.edu/academics/student-success/services/aleks-math-placement
+    topic: student-success
+    change_frequency: medium
+    notes: ALEKS Math Placement.
+  - url: https://www.desu.edu/academics/student-success/services/aleks-math-placement/accessing-aleks-first-time
+    topic: student-success
+    change_frequency: medium
+    notes: Accessing ALEKS for the First Time.
+  - url: https://www.desu.edu/academics/student-success/services/aleks-math-placement/aleks-help
+    topic: student-success
+    change_frequency: medium
+    notes: ALEKS Help.
+  - url: https://www.desu.edu/academics/student-success/services/aleks-math-placement/dates-deadlines
+    topic: student-success
+    change_frequency: medium
+    notes: Dates and Deadlines.
+  - url: https://www.desu.edu/academics/student-success/services/aleks-math-placement/understanding-your-score
+    topic: student-success
+    change_frequency: medium
+    notes: Understanding Your Score.
+  - url: https://www.desu.edu/academics/student-success/student-success-eabs-navigate
+    topic: student-success
+    change_frequency: medium
+    notes: Student Success via EAB's Navigate.
+  - url: https://www.desu.edu/academics/student-success/student-success-eabs-navigate-support/eab-navigate-students
+    topic: student-success
+    change_frequency: medium
+    notes: EAB Navigate For Students.
+  - url: https://www.desu.edu/academics/student-success/student-success-eabs-navigate-support/navigate-video-tutorials-how-tos
+    topic: student-success
+    change_frequency: medium
+    notes: "Navigate: Video Tutorials & How Tos."
+  - url: https://www.desu.edu/academics/student-success/student-success-faqs
+    topic: student-success
+    change_frequency: medium
+    notes: Student Success FAQs.
+  - url: https://www.desu.edu/academics/student-success/student-success-services
+    topic: student-success
+    change_frequency: medium
+    notes: Student Success Services.
+  - url: https://www.desu.edu/academics/testing-services
+    topic: student-success
+    change_frequency: medium
+    notes: Testing Services.

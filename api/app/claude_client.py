@@ -57,24 +57,34 @@ class AnthropicClaudeClient:
         max_tokens: int,
         timeout: float,
         sdk_client: anthropic.Anthropic | None = None,  # tests pass a stub
+        max_retries: int = MAX_RETRIES,
+        # A JSON schema the reply must match (structured outputs); None: free text
+        json_schema: dict | None = None,
     ):
         if sdk_client is None and not api_key:
             raise ValueError("ANTHROPIC_API_KEY is not set")
         self.model = model
         self.max_tokens = max_tokens
+        self.json_schema = json_schema
         # The key is passed explicitly so it only ever comes from ANTHROPIC_API_KEY (or .env).
         self._sdk = sdk_client or anthropic.Anthropic(
-            api_key=api_key, timeout=timeout, max_retries=MAX_RETRIES
+            api_key=api_key, timeout=timeout, max_retries=max_retries
         )
 
     def complete(self, system: str, messages: list[ChatMessage]) -> ClaudeReply:
         start = time.perf_counter()
         try:
+            extra = {}
+            if self.json_schema is not None:
+                extra["output_config"] = {
+                    "format": {"type": "json_schema", "schema": self.json_schema}
+                }
             response = self._sdk.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=system,
                 messages=messages,
+                **extra,
             )
         except anthropic.APITimeoutError as e:  # before APIConnectionError, its parent class
             raise self._fail(start, "timeout", e) from e

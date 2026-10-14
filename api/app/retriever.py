@@ -21,6 +21,9 @@ SYNONYMS_PATH = Path(__file__).resolve().parent / "synonyms.yaml"
 SYNONYM_WEIGHT = 0.5  # a synonym match counts half as much as the student's own word
 LOW_TEXT_PENALTY = 0.8  # low-text chunks keep 80% of their score, so they lose close calls
 MIN_SCORE = 0.1  # words found in nearly every chunk score ~0; below this counts as no match
+# BM25 weights for the title, heading_path, and text columns. A word in the page title or a
+# heading says what the chunk is about; the same word in body text is often a passing mention.
+COLUMN_WEIGHTS = (5.0, 3.0, 1.0)
 
 WORD = re.compile(r"\w+")
 LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")  # Markdown link: keep the text, drop the URL
@@ -156,9 +159,11 @@ class LocalKeywordRetriever:
         and the low-text penalty can reorder them. A few hundred chunks score in about 1 ms."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT rowid, rank FROM chunks WHERE chunks MATCH ?", (match,)
+                f"SELECT rowid, bm25(chunks, {', '.join(map(str, COLUMN_WEIGHTS))})"
+                " FROM chunks WHERE chunks MATCH ?",
+                (match,),
             ).fetchall()
-        return {rowid: -rank for rowid, rank in rows}  # FTS5: lower rank is better
+        return {rowid: -rank for rowid, rank in rows}  # FTS5: lower bm25 is better
 
 
 class ReloadingRetriever:

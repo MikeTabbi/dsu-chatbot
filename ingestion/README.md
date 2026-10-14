@@ -3,7 +3,7 @@
 Keeps the search index in sync with DSU sources.
 
 Planned steps:
-1. **Fetch** pages from the source list (sitemap first).
+1. **Fetch** pages from the source list (new pages are suggested from the sitemaps).
 2. **Skip unchanged** pages using conditional requests and a hash of the extracted text
    (`python -m ingestion.pipeline`, below).
 3. **Clean and chunk** text, keeping the source URL and date on every chunk.
@@ -36,6 +36,59 @@ pytest ingestion/tests
 The loader rejects missing or empty fields, unknown fields, non-https or off-domain URLs,
 duplicate URLs, and `change_frequency` values other than slow, medium, or fast.
 
+## Finding new pages
+
+Discovery suggests pages; a person approves them. Nothing is added to sources.yaml automatically.
+
+```bash
+python -m ingestion.discover              # ~1 hour: reads the sitemaps, fetches each candidate once
+python -m ingestion.discover --no-fetch   # ~2 minutes: sitemaps only (no dedupe, no page titles)
+# mark rows in data/discovery/candidates.csv with "yes" in the approve column, then:
+python -m ingestion.approve --dry-run     # check the approved rows and print counts by topic
+python -m ingestion.approve               # append them to sources.yaml
+python -m ingestion.pipeline              # crawl and index the new pages
+```
+
+**Discover** reads [discovery.yaml](discovery.yaml) for the hosts to scan (www.desu.edu and the
+college sites sgaes, cast, chess, business, and wchbs) and the include and exclude rules. For
+each host it reads robots.txt with the crawler's own handling (a host whose robots.txt can't be
+fetched is skipped), then `/sitemap.xml` and the HTML `/sitemap` page, and prints which exist. As
+of October 2026 all six hosts have both, with the same robots.txt and `Crawl-delay: 10`. The two
+sitemaps aren't the same: each lists about 45 www pages the other doesn't (the HTML one has the
+Banner registration guide, for example), so both are read.
+
+URLs are normalized (https, `desu.edu` as `www.desu.edu`, no query, fragment, or trailing slash),
+then filtered: a URL matching any `exclude` pattern is dropped, otherwise the first `include`
+rule that matches gives its suggested topic and `change_frequency`, and a URL no rule includes is
+dropped. The rules keep student-facing sections (admissions, financial aid and tuition, the
+registrar, academics and majors, student success and advising, housing and dining, student life,
+health and counseling, career services, the library, IT help, campus contacts and parking) and
+leave out news, events, giving, the Board of Trustees, HR and jobs, faculty- and staff-only pages,
+crime logs, and faculty profiles. Pattern syntax is at the top of discovery.yaml.
+
+Each remaining page is then fetched once through the crawler (robots.txt, the host's crawl
+delay, retries, redirects), taking turns between hosts so one host's delay doesn't hold up the
+rest. The page's `<link rel="canonical">` (else where it redirected to) identifies it: the site
+has several URLs for some pages, e.g. `student-life/student-health-services/counseling-services/...`
+and `student-life/campus-health-services/counseling-services/...`. Pages with the same canonical
+URL become one candidate, listing the others under `duplicate_urls`, and pages whose canonical URL
+is already in sources.yaml are dropped.
+
+It writes to `data/discovery/` (gitignored):
+
+- `candidates.csv`: `approve` (blank), `url` (canonical), `topic`, `change_frequency`, `title`,
+  `notes` (blank: defaults to the title), `word_count` (under 50 is flagged low-text when
+  crawled), `found_in` (`sitemap.xml`, `sitemap`), `duplicate_urls`. Edit any column before
+  approving.
+- `pdfs.csv`: PDF links seen in the sitemaps or on fetched pages, with where each was linked.
+  They aren't fetched (most are under `/sites/flagship/files/`, which www's robots.txt disallows)
+  and are kept for a later PDF feature.
+
+**Approve** appends the rows marked `yes` (or `y`, `x`) to sources.yaml, then loads the whole
+file with the same loader the crawler and pipeline use. If any entry fails (missing field, bad
+URL, bad `change_frequency`, a URL already registered), nothing is written and the error names the
+candidates.csv line. Comments and settings in sources.yaml are kept.
+
 ## Known content gaps
 
 Questions we expect but have no good source page for yet:
@@ -44,7 +97,6 @@ Questions we expect but have no good source page for yet:
   shows up only when a page mentions it in passing: the Residential Halls page gives the MLK
   Building's address as part of the Housing office's contact info, so "Where's the MLK Building?"
   is answerable, but most buildings aren't.
-- **Changing majors:** no clear page explains how to switch majors.
 - **DSU's SAT/ACT school code:** the Apply Now page says to send scores through College Board, but
   no page lists DSU's school code. (The SAT/ACT page only shows students how to download their own
   score report.)
@@ -81,8 +133,8 @@ Politeness and failure handling:
   4xx responses are skipped. Redirects are followed (up to 5) on desu.edu when robots.txt allows
   it, and the final URL is recorded. Off-domain redirects are skipped. Skipped pages are logged
   and listed in the manifest, and the crawl continues.
-- Sitemap discovery (<https://www.desu.edu/sitemap>) is not implemented yet. For now only
-  registry URLs are crawled.
+- Only registry URLs are crawled. New pages are found with discovery (see Finding new pages),
+  and added only after review.
 
 ## Extracting page content
 
