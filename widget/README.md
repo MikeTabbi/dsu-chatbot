@@ -124,8 +124,9 @@ rights with Marketing & Communications before going live.
   ago: "Just now", "5 Mins Ago", "2 Hrs Ago", "3 Days Ago" (`timeAgo()` in `dsu-chat.js`). The times update
   every minute while the panel is open. Conversations saved before version 0.7 have no time per
   message, so their messages show the conversation's last update.
-- **Feedback:** thumbs up and thumbs down below each answer (not the welcome or error messages),
-  so the answer bubble can use the full width beside the avatar.
+- **Feedback:** thumbs up and thumbs down under each answer, at the right end of the
+  "Jada · 2 Mins Ago" line (not on the welcome or error messages), so the answer bubble can use
+  the full width beside the avatar.
   "Helpful" / "Not helpful" for screen readers. They appear when the answer is hovered or a thumb
   has keyboard focus, and always on touch screens. Clicking one sends the answer's `request_id`
   to the backend's `POST /feedback`; the chosen thumb turns blue (`aria-pressed="true"`) and a

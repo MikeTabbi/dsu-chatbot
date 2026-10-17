@@ -573,19 +573,13 @@ button {
   max-width: calc(100% - 36px);
 }
 
-/* An answer with its thumbs up / down below it, so the bubble keeps the full width. */
-.bubble-row {
+/* "Jada · 2 Mins Ago" on the left and the thumbs up / down on the right, under the answer. */
+.message-footer {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  max-width: 100%;
-}
-
-.bubble-row > .message {
-  min-width: 0;
-  max-width: 100%;
-  margin-left: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  align-self: stretch;
 }
 
 /* Hidden until the answer is hovered or a button has keyboard focus; stays once one is chosen.
@@ -595,12 +589,14 @@ button {
   flex: none;
   align-items: center;
   gap: 2px;
-  margin-left: -4px; /* line the thumb icons up with the bubble's edge */
+  /* The 28px buttons overlap the line's spacing instead of making it taller, and the right
+     thumb's icon lines up with the bubble's right edge. */
+  margin: -4px -6px -4px 0;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 
-.bubble-row:hover .feedback,
+.message-group:hover .feedback,
 .feedback:focus-within,
 .feedback.chosen {
   opacity: 1;
@@ -1328,8 +1324,7 @@ textarea:focus-visible {
   max-width: 46%;
 }
 
-.fullscreen .message-group > .message,
-.fullscreen .bubble-row > .message {
+.fullscreen .message-group > .message {
   max-width: 100%;
 }
 

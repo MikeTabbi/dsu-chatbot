@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.9.1"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.9.2"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
   const PANEL_CLOSE_MS = 150; // the panel's closing fade in the CSS (.panel.closing)
@@ -1117,7 +1117,7 @@
     }
 
     /**
-     * Thumbs up / down below an answer, sent to POST /feedback with the answer's request ID.
+     * Thumbs up / down on an answer's time line, sent to POST /feedback with the answer's request ID.
      * They show when the answer is hovered or a thumb has keyboard focus, and stay visible once
      * one is chosen. Rating again replaces the earlier rating.
      */
@@ -1200,23 +1200,17 @@
     /**
      * Appends a message bubble; `fill(el)` adds its content with DOM calls, never HTML. With a time
      * (`at`), the bubble and a "You · 5 Mins" / "Ask DSU · 2 Hrs" line under it are added as one
-     * group. The loading bubble has no time. Returns the bubble.
+     * group. `trailing()`, like the feedback buttons, goes at the right end of that line. The
+     * loading bubble has no time. Returns the bubble.
      *
      * The view scrolls to the start of the new message, so a long answer is read from the top,
      * unless the student has scrolled up to read: then it stays put and "New message" appears.
      */
-    function addMessage(kind, at, fill, below) {
+    function addMessage(kind, at, fill, trailing) {
       const el = document.createElement("div");
       el.className = `message ${kind}`;
       fill(el);
-      let bubble = el;
-      if (below) {
-        // Something under the bubble, like the feedback buttons.
-        bubble = document.createElement("div");
-        bubble.className = "bubble-row";
-        bubble.append(el, below());
-      }
-      let added = bubble;
+      let added = el;
       if (typeof at === "number") {
         const who = kind.startsWith("user") ? "You" : options.title;
         const meta = document.createElement("p");
@@ -1224,9 +1218,15 @@
         meta.dataset.at = String(at);
         meta.dataset.who = who;
         meta.textContent = `${who} · ${timeAgo(at)}`;
+        let footer = meta;
+        if (trailing) {
+          footer = document.createElement("div");
+          footer.className = "message-footer";
+          footer.append(meta, trailing());
+        }
         added = document.createElement("div");
         added.className = `message-group ${kind.startsWith("user") ? "user" : "bot"}`;
-        added.append(bubble, meta);
+        added.append(el, footer);
       }
       const mine = kind.startsWith("user");
       const follow = mine || restoring || scrolling || !messages.clientHeight || isNearBottom(messages);
