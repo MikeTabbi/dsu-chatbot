@@ -96,7 +96,7 @@
         <div class="mock-buttons">
           <button type="button" data-question="Where is DSU? (short)">Short answer ("short")</button>
           <button type="button" data-question="How can I get a meal plan? (long answer)">
-            Long answer ("long answer")
+            Long answer with Show more and Sources (2) ("long answer")
           </button>
           <button type="button" data-question="What's my GPA? (personal)">
             Personal data ("personal")
@@ -104,7 +104,12 @@
           <button type="button" data-question="Write me a poem (off topic)">
             Off-topic ("off topic")
           </button>
-          <button type="button" data-question="Where is DSU? (slow)">Loading, 5 seconds ("slow")</button>
+          <button type="button" data-question="Where is DSU? (slow)">
+            Typing indicator, 5 seconds ("slow")
+          </button>
+          <button type="button" data-question="Which meal plans are there? (new message)" data-scroll-up>
+            New message button ("new message", then scroll up)
+          </button>
           <button type="button" data-question="Where is DSU? (rate limit)">
             Too many questions ("rate limit")
           </button>
@@ -147,7 +152,7 @@
       // Mock panel buttons: open the widget and ask the question. Demo page only.
       if (window.DSU_CHAT_MOCK) {
         document.getElementById("mock-panel").hidden = false;
-        document.querySelector(".mock-buttons").addEventListener("click", (event) => {
+        document.querySelector(".mock-buttons").addEventListener("click", async (event) => {
           const button = event.target.closest("button");
           const root = document.getElementById("dsu-chat-widget")?.shadowRoot;
           const input = root?.querySelector("textarea");
@@ -156,11 +161,29 @@
           if (launcher?.getAttribute("aria-expanded") === "false") launcher.click();
           const start = root.querySelector(".start");
           if (start?.offsetParent) start.click(); // on the home screen: start a new chat
-          input.value = button.hasAttribute("data-fill-too-long")
-            ? "a".repeat(1001)
-            : button.dataset.question;
-          input.dispatchEvent(new Event("input"));
-          input.form.requestSubmit();
+          const ask = (question) => {
+            input.value = question;
+            input.dispatchEvent(new Event("input"));
+            input.form.requestSubmit();
+          };
+          const answered = () =>
+            new Promise((resolve) => {
+              const check = () => (root.querySelector(".send.busy") ? setTimeout(check, 100) : resolve());
+              setTimeout(check, 100);
+            });
+
+          if (button.hasAttribute("data-scroll-up")) {
+            // "New message": needs earlier messages to scroll up to, so ask a long one first.
+            const messages = root.querySelector(".messages");
+            if (messages.scrollHeight < messages.clientHeight + 200) {
+              ask("How can I get a meal plan? (long answer)");
+              await answered();
+            }
+            ask(button.dataset.question);
+            setTimeout(() => (messages.scrollTop = 0), 500); // scroll up while the answer loads
+            return;
+          }
+          ask(button.hasAttribute("data-fill-too-long") ? "a".repeat(1001) : button.dataset.question);
         });
       }
     </script>

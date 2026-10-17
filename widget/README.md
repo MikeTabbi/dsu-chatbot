@@ -24,6 +24,7 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
 | `tests/mock.test.js` | Checks that mock mode, thumbs up/down included, never makes a network request |
 | `tests/history.test.js` | Checks saved conversations: limits, expiry, moving the old save, blocked storage |
+| `tests/fluid.test.js` | Checks Show more, the Sources chip, and the New message button |
 
 ## Embedding it on a site (Drupal)
 
@@ -123,7 +124,9 @@ rights with Marketing & Communications before going live.
   ago: "Just now", "5 Mins Ago", "2 Hrs Ago", "3 Days Ago" (`timeAgo()` in `dsu-chat.js`). The times update
   every minute while the panel is open. Conversations saved before version 0.7 have no time per
   message, so their messages show the conversation's last update.
-- **Feedback:** thumbs up and thumbs down beside each answer (not the welcome or error messages),
+- **Feedback:** thumbs up and thumbs down under each answer, at the right end of the
+  "Jada · 2 Mins Ago" line (not on the welcome or error messages), so the answer bubble can use
+  the full width beside the avatar.
   "Helpful" / "Not helpful" for screen readers. They appear when the answer is hovered or a thumb
   has keyboard focus, and always on touch screens. Clicking one sends the answer's `request_id`
   to the backend's `POST /feedback`; the chosen thumb turns blue (`aria-pressed="true"`) and a
@@ -137,8 +140,27 @@ rights with Marketing & Communications before going live.
   questions or answers, so a follow-up like "how much is it?" won't know what "it" means. The
   welcome message tells students to include the details each time.
 - **Answers:** shown with basic Markdown: **bold**, *italic*, bullet and numbered lists, and links.
-- **Sources:** one card per cited page. The answer text doesn't repeat them (the system prompt no
-  longer asks for a "Source:" line).
+- **Long answers:** an answer taller than about 220px (`COLLAPSED_PX` in `dsu-chat.js`, also in the
+  CSS) starts cut off, fading out at the bottom, with **Show more** under it. Show more slides
+  the answer open and becomes **Show less**. Answers only a little too long are shown whole.
+  Screen readers always get the whole answer, and tabbing to a link in the hidden part opens it.
+- **Sources:** one card per cited page, behind a **Sources (n)** chip under the answer. Tapping
+  the chip shows the cards (they stagger in) and tapping again hides them. The answer text
+  doesn't repeat them (the system prompt no longer asks for a "Source:" line).
+- **Scrolling:** when a message arrives, the conversation scrolls to its start, so a long answer
+  is read from the top. If the student has scrolled up to reread something, it doesn't jump:
+  a **New message** button appears over the bottom of the conversation. It scrolls to the first
+  unseen message and moves focus there. Scrolling down to the message also hides it.
+- **Typing indicator:** three dots in a small bubble while an answer loads ("Looking that up…"
+  for screen readers). The answer takes its place.
+- **Motion:** messages slide up and fade in (200 ms), the panel opens and closes with a soft
+  scale and fade from the chat button, source cards stagger in, and buttons and chips shrink
+  slightly when pressed. All motion is 150–300 ms and plain CSS, with no library. With the
+  system's **reduce motion** setting on, nothing moves: the panel, messages, and cards only
+  fade, Show more opens at once, and scrolling jumps instead of gliding.
+- **Ready for streaming:** answers have no fixed height (Show more removes its limit once open),
+  and the typing bubble is the height of a one-line answer, so a streamed answer can replace it
+  and grow downward without the view jumping.
 - **Notice:** the panel says it's an AI assistant that answers from DSU's website and can make
   mistakes, not to share personal information, and to contact the office for official decisions.
 - **Errors:** a too-long or empty question shows a message under the box without calling the
@@ -215,11 +237,12 @@ word in quotes does the same:
 
 | State | Button or word |
 |---|---|
-| Short answer, one source card | "short" (also any question without the other words) |
-| Long answer with lists and links, two source cards | "long answer" |
+| Short answer, Sources (1) chip | "short" (also any question without the other words) |
+| Long answer with lists and links: Show more / Show less, Sources (2) chip | "long answer" |
 | Personal-data redirect, no sources | "personal" |
 | Off-topic decline | "off topic" |
-| Loading dots for 5 seconds, then the short answer | "slow" |
+| Typing indicator for 5 seconds, then the short answer | "slow" |
+| New message button: the long answer after 2.5 seconds. The button asks a long answer first if there's nothing to scroll back to, then scrolls up while it loads | "new message" |
 | Too many questions (429), the API's "please wait" message | "rate limit" |
 | Unavailable (503) | "503" |
 | Network error | "network" |

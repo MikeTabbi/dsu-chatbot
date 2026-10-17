@@ -17,9 +17,10 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.8.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.9.2"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
+  const PANEL_CLOSE_MS = 150; // the panel's closing fade in the CSS (.panel.closing)
 
   const MESSAGES = {
     welcome:
@@ -268,6 +269,158 @@
   }
 
   // ---------------------------------------------------------------------------------------------
+  // Fluid answers: Show more, the Sources chip, and the New message button. Each takes the
+  // elements it works on (fake ones in the tests) and only ever sets fixed text.
+  // ---------------------------------------------------------------------------------------------
+
+  const COLLAPSED_PX = 220; // how much of a long answer shows before "Show more" (also in the CSS)
+  const MIN_HIDDEN_PX = 100; // an answer only a little too long is shown whole
+  const MOTION_MS = 250; // Show more and scrolling. All motion stays between 150 and 300 ms.
+  const NEAR_BOTTOM_PX = 48; // this close to the bottom counts as "reading the latest message"
+
+  /** True when an answer this tall (in px) should start cut off with "Show more". */
+  function needsShowMore(height) {
+    return height > COLLAPSED_PX + MIN_HIDDEN_PX;
+  }
+
+  /** True when a scrolled element is at, or within NEAR_BOTTOM_PX of, its bottom. */
+  function isNearBottom(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  }
+
+  function reducedMotion() {
+    return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  /**
+   * "Show more" under a long answer, which starts cut off at COLLAPSED_PX. With `animate()` true
+   * the height slides open or shut; afterwards the answer has no fixed height, so it can keep
+   * growing (for streamed text). Tabbing to a link in the cut-off part opens the answer, so focus
+   * never lands on hidden text. Screen readers always get the whole answer.
+   */
+  function showMore(doc, answer, animate = () => false) {
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.className = "show-more";
+    button.setAttribute("aria-controls", answer.id);
+    button.setAttribute("aria-expanded", "false");
+    button.textContent = "Show more";
+    answer.classList.add("collapsed");
+    let finish = null; // ends a height animation that's still running
+
+    function set(expanded) {
+      if (finish) finish();
+      button.setAttribute("aria-expanded", String(expanded));
+      button.textContent = expanded ? "Show less" : "Show more";
+      answer.classList.toggle("collapsed", !expanded);
+      if (!animate()) return;
+      const cut = `${COLLAPSED_PX}px`;
+      const full = `${answer.scrollHeight}px`;
+      answer.style.maxHeight = expanded ? cut : full;
+      answer.classList.add("sizing");
+      void answer.offsetHeight; // start from the old height
+      answer.style.maxHeight = expanded ? full : cut;
+      const timer = setTimeout(() => finish(), MOTION_MS + 100); // if transitionend never comes
+      const onEnd = (event) => event.target === answer && finish();
+      answer.addEventListener("transitionend", onEnd);
+      finish = () => {
+        clearTimeout(timer);
+        answer.removeEventListener("transitionend", onEnd);
+        answer.classList.remove("sizing");
+        answer.style.maxHeight = "";
+        finish = null;
+      };
+    }
+
+    button.addEventListener("click", () => set(button.getAttribute("aria-expanded") !== "true"));
+    answer.addEventListener("focusin", (event) => {
+      if (!answer.classList.contains("collapsed")) return;
+      const box = event.target.getBoundingClientRect?.();
+      const top = answer.getBoundingClientRect?.().top;
+      if (!box || box.bottom > top + COLLAPSED_PX) set(true);
+    });
+    return button;
+  }
+
+  /** A "Sources (n)" chip that shows and hides the source card `list`, which starts hidden. */
+  function sourcesChip(doc, list, id) {
+    const chip = doc.createElement("button");
+    chip.type = "button";
+    chip.className = "chip sources-chip";
+    chip.textContent = `Sources (${list.children.length})`;
+    chip.setAttribute("aria-expanded", "false");
+    chip.setAttribute("aria-controls", id);
+    list.id = id;
+    list.hidden = true;
+    chip.addEventListener("click", () => {
+      const open = chip.getAttribute("aria-expanded") !== "true";
+      chip.setAttribute("aria-expanded", String(open));
+      list.hidden = !open;
+    });
+    const block = doc.createElement("div");
+    block.className = "sources-block";
+    block.append(chip, list);
+    return block;
+  }
+
+  /**
+   * The "New message" button over the conversation. A message that arrives while the student has
+   * scrolled up to read stays out of the way and the button appears; it scrolls to (and focuses)
+   * the first message they haven't seen. Scrolling down to that message hides the button.
+   */
+  function newMessageNotifier(container, button, scrollTo) {
+    let unseen = null;
+    const clear = () => {
+      unseen = null;
+      button.hidden = true;
+    };
+    container.addEventListener("scroll", () => {
+      const visible = unseen && container.scrollTop + container.clientHeight >= unseen.offsetTop + 40;
+      if (visible || (unseen && isNearBottom(container))) clear();
+    });
+    button.addEventListener("click", () => {
+      const target = unseen;
+      clear();
+      if (!target) return;
+      scrollTo(target);
+      target.setAttribute("tabindex", "-1"); // so focus can move there for keyboard users
+      target.addEventListener("blur", () => target.removeAttribute("tabindex"), { once: true });
+      target.focus({ preventScroll: true });
+    });
+    return {
+      /** `el` was just added. Scroll to its start if `follow`, else offer the button (`notify`). */
+      added(el, follow, notify = true) {
+        if (follow) {
+          clear();
+          scrollTo(el);
+        } else if (notify && !unseen) {
+          unseen = el;
+          button.hidden = false;
+        }
+      },
+      clear,
+    };
+  }
+
+  /** Scrolls `el` to `top` over MOTION_MS (eased), or at once with reduced motion. */
+  function animateScroll(el, top, done = () => {}) {
+    const from = el.scrollTop;
+    if (reducedMotion() || typeof requestAnimationFrame !== "function" || Math.abs(top - from) < 2) {
+      el.scrollTop = top;
+      done();
+      return;
+    }
+    const start = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / MOTION_MS);
+      el.scrollTop = from + (top - from) * (1 - (1 - t) ** 3);
+      if (t < 1) requestAnimationFrame(step);
+      else done();
+    };
+    requestAnimationFrame(step);
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // The widget: launcher button, chat panel, and the call to POST /chat.
   // ---------------------------------------------------------------------------------------------
 
@@ -293,6 +446,8 @@
       '<svg class="chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M9.3 5.3 10.7 3.9 18.8 12l-8.1 8.1-1.4-1.4 6.7-6.7z"/></svg>',
     back:
       '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M14.7 5.3 13.3 3.9 5.2 12l8.1 8.1 1.4-1.4L8 12z"/></svg>',
+    down:
+      '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M13 4v12.2l5.6-5.6L20 12l-8 8-8-8 1.4-1.4 5.6 5.6V4z"/></svg>',
   };
 
   const WINDOW_BUTTONS = `
@@ -311,14 +466,14 @@
       </button>
       <section class="panel" id="panel" role="dialog" hidden>
         <div class="view home">
-          <header class="hero">
+          <div class="hero">
             <div class="hero-top">
               <span class="avatar avatar-hero" aria-hidden="true"></span>
               ${WINDOW_BUTTONS}
             </div>
             <h2 class="hero-title">Welcome to Delaware State University!</h2>
             <p class="hero-subtitle">How can we help you today?</p>
-          </header>
+          </div>
           <div class="home-body">
             <button class="start" type="button">${ICON.chat}<span>Start New Conversation</span></button>
             <button class="card resume" type="button">
@@ -344,18 +499,21 @@
           </div>
         </div>
         <div class="view chat" hidden>
-          <header class="header">
+          <div class="header">
             <button class="icon-button back" type="button" aria-label="Back to home">${ICON.back}</button>
             <span class="avatar avatar-header" aria-hidden="true"></span>
             <h2 class="title"></h2>
             ${WINDOW_BUTTONS}
-          </header>
+          </div>
           <p class="notice">
             Hi, I'm Jada! I'm an AI assistant that answers from DSU's website, and I can make mistakes. Don't
             share personal information. For official decisions, contact the DSU office that
             handles your question.
           </p>
-          <div class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+          <div class="messages-wrap">
+            <div class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+            <button class="new-message" type="button" hidden>${ICON.down}<span>New message</span></button>
+          </div>
           <form class="form" novalidate>
             <label class="sr-only" for="question">Your question</label>
             <div class="composer">
@@ -373,12 +531,12 @@
           </form>
         </div>
         <div class="view past-view" hidden>
-          <header class="header">
+          <div class="header">
             <button class="icon-button back" type="button" aria-label="Back to home">${ICON.back}</button>
             <span class="avatar avatar-header" aria-hidden="true"></span>
             <h2 class="title">Past Conversations</h2>
             ${WINDOW_BUTTONS}
-          </header>
+          </div>
           <p class="notice">
             Conversations are saved in this browser on this device only, so anyone who uses this
             browser can see them. The last 10 are kept for up to 30 days.
@@ -570,6 +728,13 @@
     const formError = $("#form-error");
     const send = $(".send");
     let busy = false;
+    let closing = null; // timer while the panel plays its closing fade
+    let restoring = false; // true while a saved conversation is redrawn
+    let scrolling = false; // true while the conversation scrolls to a new message
+    let ids = 0;
+    const nextId = (prefix) => `${prefix}-${++ids}`;
+    const unfitted = []; // answers added while the chat was hidden, measured once it shows
+    const newMessage = newMessageNotifier(messages, $(".new-message"), scrollToMessage);
     const storage = browserStorage();
     let history = loadHistory(storage, Date.now()); // saved conversations, newest first
     let conversation = null; // the conversation on screen, once it has a saved question
@@ -583,6 +748,9 @@
     updateHome();
 
     function open() {
+      clearTimeout(closing);
+      closing = null;
+      panel.classList.remove("closing");
       panel.hidden = false;
       widget.classList.add("open");
       launcher.setAttribute("aria-expanded", "true");
@@ -592,11 +760,18 @@
       else $(".start").focus();
     }
 
+    /** Fades the panel out toward the chat button (CSS .panel.closing), then hides it. */
     function close() {
-      panel.hidden = true;
+      if (!widget.classList.contains("open")) return;
       widget.classList.remove("open");
       launcher.setAttribute("aria-expanded", "false");
       launcher.focus();
+      panel.classList.add("closing");
+      closing = setTimeout(() => {
+        panel.hidden = true;
+        panel.classList.remove("closing");
+        closing = null;
+      }, PANEL_CLOSE_MS);
     }
 
     /** Shows one of the three screens: home, chat, or past-view. */
@@ -614,11 +789,19 @@
 
     function showChat() {
       showView(chat);
+      for (const answer of unfitted.splice(0)) if (answer.isConnected) fitAnswer(answer);
       input.focus();
     }
 
-    function startNew() {
+    /** Empties the conversation area. */
+    function clearMessages() {
       messages.textContent = "";
+      unfitted.length = 0;
+      newMessage.clear();
+    }
+
+    function startNew() {
+      clearMessages();
       conversation = null;
       shownId = "new";
       addBotText(MESSAGES.welcome, Date.now());
@@ -628,7 +811,8 @@
     /** Reopens a saved conversation. Answers go through addAnswer, the same as new ones. */
     function openConversation(saved) {
       if (shownId !== saved.id) {
-        messages.textContent = "";
+        clearMessages();
+        restoring = true;
         addBotText(MESSAGES.welcome, saved.created || saved.updated);
         for (const m of saved.messages) {
           // Conversations saved before version 0.7 have no per-message time: use the last update.
@@ -636,12 +820,14 @@
           if (m.role === "user") userMessage(String(m.text), at);
           else if (m.data && typeof m.data.answer === "string") addAnswer(m.data, at);
         }
+        restoring = false;
         conversation = saved;
         shownId = saved.id;
       }
       showChat();
+      newMessage.clear();
       const last = messages.lastElementChild;
-      if (last) messages.scrollTop = last.offsetTop - messages.offsetTop - 16;
+      if (last) messages.scrollTop = last.offsetTop - 16;
     }
 
     /** Plain text of a conversation's last answer, for previews. Built safely, then read back. */
@@ -751,7 +937,7 @@
       saveHistory(storage, history);
       if (conversation) {
         // The open chat was saved, so it's gone too.
-        messages.textContent = "";
+        clearMessages();
         conversation = null;
         shownId = null;
       }
@@ -769,7 +955,7 @@
       }
     }
 
-    launcher.addEventListener("click", () => (panel.hidden ? open() : close()));
+    launcher.addEventListener("click", () => (widget.classList.contains("open") ? close() : open()));
     for (const button of $$(".close")) button.addEventListener("click", close);
     for (const button of $$(".expand")) button.addEventListener("click", toggleFullscreen);
     for (const button of $$(".back")) button.addEventListener("click", showHome);
@@ -835,7 +1021,7 @@
 
       if (shownId === null) {
         // Asked without Start or Resume (for example from a script): begin a new conversation.
-        messages.textContent = "";
+        clearMessages();
         conversation = null;
         shownId = "new";
         addBotText(MESSAGES.welcome);
@@ -847,12 +1033,13 @@
       input.value = "";
       updateCount();
       setBusy(true);
+      // Typing indicator: three dots on screen, "Looking that up…" for screen readers.
       const loading = addMessage("bot loading", null, (el) => {
         const dots = document.createElement("span");
         dots.className = "dots";
         dots.setAttribute("aria-hidden", "true");
         dots.append(...[1, 2, 3].map(() => document.createElement("span")));
-        el.append(dots, document.createTextNode(MESSAGES.loading));
+        el.append(dots, srOnly(document, MESSAGES.loading));
       });
 
       try {
@@ -863,6 +1050,7 @@
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
         const data = await response.json().catch(() => null);
+        loading.remove(); // first, so the reply takes its place instead of jumping up after it
         if (response.ok && data && typeof data.answer === "string") {
           const answeredAt = Date.now();
           addAnswer(data, answeredAt);
@@ -872,6 +1060,7 @@
           failed(errorMessage(response.status, data), question);
         }
       } catch {
+        loading.remove();
         failed(MESSAGES.network, question); // offline, CORS blocked, or timed out
       } finally {
         loading.remove();
@@ -921,14 +1110,14 @@
         const sources = (Array.isArray(data.sources) ? data.sources : []).filter(
           (s) => s && typeof s.url === "string" && isSafeUrl(s.url)
         );
-        if (sources.length) el.appendChild(sourceCards(sources));
+        if (sources.length) el.appendChild(sourcesChip(document, sourceCards(sources), nextId("sources")));
       }, typeof data.request_id === "string" && data.request_id
         ? () => feedbackButtons(data.request_id)
         : null);
     }
 
     /**
-     * Thumbs up / down beside an answer, sent to POST /feedback with the answer's request ID.
+     * Thumbs up / down on an answer's time line, sent to POST /feedback with the answer's request ID.
      * They show when the answer is hovered or a thumb has keyboard focus, and stay visible once
      * one is chosen. Rating again replaces the earlier rating.
      */
@@ -1008,24 +1197,20 @@
       return list;
     }
 
-    /** Appends a message bubble; `fill(el)` adds its content with DOM calls, never HTML. */
     /**
      * Appends a message bubble; `fill(el)` adds its content with DOM calls, never HTML. With a time
      * (`at`), the bubble and a "You · 5 Mins" / "Ask DSU · 2 Hrs" line under it are added as one
-     * group. The loading bubble has no time. Returns the bubble.
+     * group. `trailing()`, like the feedback buttons, goes at the right end of that line. The
+     * loading bubble has no time. Returns the bubble.
+     *
+     * The view scrolls to the start of the new message, so a long answer is read from the top,
+     * unless the student has scrolled up to read: then it stays put and "New message" appears.
      */
-    function addMessage(kind, at, fill, beside) {
+    function addMessage(kind, at, fill, trailing) {
       const el = document.createElement("div");
       el.className = `message ${kind}`;
       fill(el);
-      let bubble = el;
-      if (beside) {
-        // Something next to the bubble, like the feedback buttons.
-        bubble = document.createElement("div");
-        bubble.className = "bubble-row";
-        bubble.append(el, beside());
-      }
-      let added = bubble;
+      let added = el;
       if (typeof at === "number") {
         const who = kind.startsWith("user") ? "You" : options.title;
         const meta = document.createElement("p");
@@ -1033,14 +1218,47 @@
         meta.dataset.at = String(at);
         meta.dataset.who = who;
         meta.textContent = `${who} · ${timeAgo(at)}`;
+        let footer = meta;
+        if (trailing) {
+          footer = document.createElement("div");
+          footer.className = "message-footer";
+          footer.append(meta, trailing());
+        }
         added = document.createElement("div");
         added.className = `message-group ${kind.startsWith("user") ? "user" : "bot"}`;
-        added.append(bubble, meta);
+        added.append(el, footer);
       }
+      const mine = kind.startsWith("user");
+      const follow = mine || restoring || scrolling || !messages.clientHeight || isNearBottom(messages);
+      if (restoring) added.classList.add("settled"); // redrawn messages don't slide in
       messages.appendChild(added); // added whole, so the live region reads it once
-      // Scroll to the start of the new message, so a long answer is read from the top.
-      messages.scrollTop = added.offsetTop - messages.offsetTop - 16;
+      for (const answer of el.querySelectorAll(".answer")) fitAnswer(answer);
+      if (!restoring) newMessage.added(added, follow, !kind.includes("loading"));
       return el;
+    }
+
+    function scrollToMessage(el) {
+      scrolling = true;
+      animateScroll(messages, Math.max(0, el.offsetTop - 16), () => (scrolling = false));
+    }
+
+    /** Cuts a long answer off with "Show more". Needs the chat on screen to measure it. */
+    function fitAnswer(answer) {
+      if (!messages.clientHeight) {
+        unfitted.push(answer);
+        return;
+      }
+      if (!needsShowMore(answer.scrollHeight)) return;
+      answer.id = nextId("answer");
+      const button = showMore(document, answer, () => !reducedMotion());
+      button.addEventListener("click", () => {
+        // After "Show less", bring the answer's start back if it's above the view.
+        const group = answer.closest(".message-group") || answer;
+        if (answer.classList.contains("collapsed") && group.offsetTop < messages.scrollTop) {
+          scrollToMessage(group);
+        }
+      });
+      answer.after(button);
     }
 
     /** A small filled icon from one SVG path (built with DOM calls). */
@@ -1126,6 +1344,12 @@
       LEGACY_KEY,
       MAX_CONVERSATIONS,
       MAX_AGE_DAYS,
+      needsShowMore,
+      isNearBottom,
+      showMore,
+      sourcesChip,
+      newMessageNotifier,
+      COLLAPSED_PX,
     };
   }
   if (typeof document !== "undefined") boot();

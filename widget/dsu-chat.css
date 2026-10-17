@@ -196,7 +196,15 @@ button {
   border-radius: 10px;
   background: var(--surface);
   box-shadow: var(--shadow);
-  animation: rise 0.2s ease-out;
+  /* Opens and closes with a soft scale and fade from the chat button below it. */
+  transform-origin: calc(100% - 48px) calc(100% + 44px);
+  animation: panel-in 0.2s ease-out;
+}
+
+/* Set by close() in dsu-chat.js for PANEL_CLOSE_MS, then the panel is hidden. */
+.panel.closing {
+  animation: panel-out 0.15s ease-in forwards;
+  pointer-events: none;
 }
 
 .panel.fullscreen {
@@ -213,14 +221,30 @@ button {
   display: none;
 }
 
-@keyframes rise {
+@keyframes panel-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px) scale(0.95);
   }
+}
+
+@keyframes panel-out {
   to {
-    opacity: 1;
-    transform: none;
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+}
+
+/* Used instead of the moving animations when the visitor asks for reduced motion. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
   }
 }
 
@@ -441,9 +465,20 @@ button {
 
 /* ---- Messages ----------------------------------------------------------------------------- */
 
+/* Holds the conversation and the "New message" button floating over its bottom edge. */
+.messages-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .messages {
+  position: relative; /* message offsetTop is measured from here (dsu-chat.js) */
   flex: 1;
   overflow-y: auto;
+  overflow-anchor: auto; /* text growing below the view (streaming, later) doesn't move it */
   padding: 24px 28px;
   display: flex;
   flex-direction: column;
@@ -533,18 +568,18 @@ button {
   margin-left: 0;
 }
 
-/* An answer and its thumbs up / down, side by side. */
-.bubble-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  max-width: 100%;
+/* Answers use the full width beside the avatar. */
+.message-group.bot {
+  max-width: calc(100% - 36px);
 }
 
-.bubble-row > .message {
-  min-width: 0;
-  max-width: 100%;
-  margin-left: 0;
+/* "Jada · 2 Mins Ago" on the left and the thumbs up / down on the right, under the answer. */
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  align-self: stretch;
 }
 
 /* Hidden until the answer is hovered or a button has keyboard focus; stays once one is chosen.
@@ -552,12 +587,16 @@ button {
 .feedback {
   display: flex;
   flex: none;
+  align-items: center;
   gap: 2px;
+  /* The 28px buttons overlap the line's spacing instead of making it taller, and the right
+     thumb's icon lines up with the bubble's right edge. */
+  margin: -4px -6px -4px 0;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 
-.bubble-row:hover .feedback,
+.message-group:hover .feedback,
 .feedback:focus-within,
 .feedback.chosen {
   opacity: 1;
@@ -627,10 +666,13 @@ button {
   text-decoration: underline;
 }
 
+/* Typing indicator: three dots in a bubble the height of a one-line answer, so the reply takes
+   its place without a jump. */
 .loading {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 41px;
   color: var(--muted);
 }
 
@@ -668,14 +710,20 @@ button {
   }
 }
 
+@keyframes dot-fade {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dots span {
-    animation: none;
-    opacity: 0.6;
-  }
-
-  .panel {
-    animation: none;
+    animation-name: dot-fade; /* fades only, no bounce */
   }
 
   .launcher,
@@ -694,7 +742,7 @@ button {
 
 .sources {
   list-style: none;
-  margin: 12px 0 0 !important;
+  margin: 8px 0 0 !important;
   padding: 0 !important;
   display: flex;
   flex-direction: column;
@@ -719,6 +767,30 @@ button {
   border-color: var(--blue);
 }
 
+/* Cards stagger in when the Sources chip opens: 40 ms apart, done within 300 ms. */
+.sources li {
+  animation: card-in 0.18s ease-out both;
+}
+
+.sources li:nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.sources li:nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.sources li:nth-child(n + 4) {
+  animation-delay: 120ms;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 .source-title {
   color: var(--accent); /* #D51C28 on #f4f6f8: 4.8:1 */
   font-weight: 700;
@@ -728,6 +800,231 @@ button {
 .source-url,
 .source-date {
   color: var(--muted);
+}
+
+/* ---- Fluid answers: entry, Show more, Sources chip, New message --------------------------- */
+
+/* New messages slide up and fade in. Messages redrawn from a saved conversation don't. */
+.message-group,
+.messages > .message {
+  animation: message-in 0.2s ease-out both;
+}
+
+.messages .settled {
+  animation: none;
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* A long answer starts cut off (COLLAPSED_PX in dsu-chat.js) and fades out at the bottom.
+   No fixed height otherwise, so an answer can grow as text arrives. */
+.answer.collapsed {
+  max-height: 220px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 56px), transparent);
+}
+
+/* While Show more / Show less slides the height (MOTION_MS in dsu-chat.js). */
+.answer.sizing {
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+
+/* Dark blue on white: 7.9:1. */
+.show-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin-top: 4px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.show-more:hover {
+  text-decoration-thickness: 2px;
+}
+
+.sources-block {
+  margin-top: 10px;
+}
+
+/* Pill buttons, like "Sources (2)". Dark blue on the light gray: 7.3:1. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.chip:hover {
+  border-color: var(--blue);
+  background: var(--bg);
+}
+
+/* A small arrow that points down, and up once the cards are open. */
+.sources-chip::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+}
+
+.sources-chip[aria-expanded="true"]::after {
+  margin-top: 3px;
+  transform: rotate(-135deg);
+}
+
+/* Floats over the bottom of the conversation when an answer arrives while you're scrolled up. */
+.new-message {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 14px 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #ffffff; /* 7.9:1 */
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transform: translateX(-50%);
+  transition: transform 0.15s ease;
+  animation: pill-in 0.2s ease-out;
+}
+
+.new-message:hover {
+  filter: brightness(0.92);
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+/* Focused by the New message button, so keyboard users land on the new answer. */
+.message-group:focus {
+  outline: none;
+}
+
+.message-group:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+/* Small press feedback on buttons and chips. */
+.icon-button,
+.send,
+.feedback button,
+.show-more {
+  transition: transform 0.15s ease;
+}
+
+.card {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.launcher:active,
+.start:active,
+.icon-button:active,
+.send:active:not(:disabled),
+.feedback button:active,
+.chip:active,
+.show-more:active,
+.card:active:not([aria-disabled="true"]) {
+  transform: scale(0.96);
+}
+
+.new-message:active {
+  transform: translateX(-50%) scale(0.96);
+}
+
+/* Reduced motion: nothing moves. The panel, messages, cards, and button only fade; heights,
+   arrows, and presses change at once. dsu-chat.js also scrolls without animating. */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation-name: fade-in;
+  }
+
+  .panel.closing {
+    animation-name: fade-out;
+  }
+
+  .message-group,
+  .messages > .message,
+  .sources li,
+  .new-message {
+    animation-name: fade-in;
+  }
+
+  .messages .settled {
+    animation: none;
+  }
+
+  .answer.sizing,
+  .chip,
+  .sources-chip::after,
+  .icon-button,
+  .send,
+  .feedback button,
+  .show-more,
+  .new-message {
+    transition: none;
+  }
+
+  .card {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .launcher:active,
+  .start:active,
+  .icon-button:active,
+  .send:active:not(:disabled),
+  .feedback button:active,
+  .chip:active,
+  .show-more:active,
+  .card:active:not([aria-disabled="true"]) {
+    transform: none;
+  }
+
+  .new-message:active {
+    transform: translateX(-50%);
+  }
 }
 
 /* ---- Question form ------------------------------------------------------------------------ */
@@ -1027,8 +1324,7 @@ textarea:focus-visible {
   max-width: 46%;
 }
 
-.fullscreen .message-group > .message,
-.fullscreen .bubble-row > .message {
+.fullscreen .message-group > .message {
   max-width: 100%;
 }
 
@@ -1043,6 +1339,7 @@ textarea:focus-visible {
     height: auto;
     max-height: none;
     border-radius: 0;
+    transform-origin: 100% 100%; /* the chat button's corner */
   }
 
   .expand {
