@@ -135,7 +135,8 @@ rights with Marketing & Communications before going live.
 - **Question box:** the character count and a round send arrow (labeled "Send" for screen
   readers) sit inside the box. Enter also sends.
 - **Full screen:** the button next to the X fills the browser window. Messages sit in a centered
-  column, each a little under half its width. Press it again to go back. Phones are always full screen, so it's hidden there.
+  800px column. Your questions take a little under half of it, and answers are up to 720px wide,
+  a comfortable reading width. Press it again to go back. Phones are always full screen, so it's hidden there.
 - **One question at a time:** each question is sent on its own. The backend doesn't get earlier
   questions or answers, so a follow-up like "how much is it?" won't know what "it" means. The
   welcome message tells students to include the details each time.

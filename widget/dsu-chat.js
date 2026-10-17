@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.9.2"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.9.3"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
   const PANEL_CLOSE_MS = 150; // the panel's closing fade in the CSS (.panel.closing)
