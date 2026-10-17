@@ -22,6 +22,8 @@ groups:
   # pages (#69). Bare "enroll" and "enrolling" are left out: search stems them to "enrol", which
   # matches Dual Enrollment and "Confirm enrollment" pages, and "enroll in classes" means
   # register. Bare "apply" is left out too: "apply for housing" isn't an admissions question.
+  # The page titles stay even with query rewriting (#71): without them, "What are the
+  # requirements to enroll at DSU?" missed the Undergraduate Students and Apply Now pages.
   - admission requirement, undergraduate student, apply now, undergraduate application, enrolling at, enrolling here, enroll at, enroll here, get into, apply to, apply here
   - advisor, adviser, advisement
   - gym, fitness center, wellness and recreation, wrc, wellrec
