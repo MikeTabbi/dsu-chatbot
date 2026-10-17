@@ -107,7 +107,7 @@ def test_regex_alternation_is_not_split_and_every_repo_regex_compiles():
     assert run._split("re:(a|b) is (c|d)|plain") == ["re:(a|b) is (c|d)", "plain"]
     phrases = [p for c in load_cases() for p in c.must_contain + c.must_not_contain]
     regexes = [p for p in phrases if p.startswith("re:")]
-    assert len(regexes) == 36
+    assert len(regexes) == 41
     for p in regexes:
         re.compile(p[3:])
 

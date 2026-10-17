@@ -18,6 +18,11 @@ groups:
   - dorm, residence hall, hall
   - meal plan, dining
   - register, registration, enroll
+  # Getting admitted, in the words parents and applicants use, and the titles of DSU's admissions
+  # pages (#69). Bare "enroll" and "enrolling" are left out: search stems them to "enrol", which
+  # matches Dual Enrollment and "Confirm enrollment" pages, and "enroll in classes" means
+  # register. Bare "apply" is left out too: "apply for housing" isn't an admissions question.
+  - admission requirement, undergraduate student, apply now, undergraduate application, enrolling at, enrolling here, enroll at, enroll here, get into, apply to, apply here
   - advisor, adviser, advisement
   - gym, fitness center, wellness and recreation, wrc, wellrec
   - switch, change, changing
