@@ -6,6 +6,7 @@ from pydantic import SecretStr
 
 from api.app.claude_client import ClaudeError, FakeClaudeClient
 from api.app.main import app, get_chat_client, get_chat_retriever
+from api.app.query_rewriter import FakeQueryRewriter, RewriteError
 from api.app.reranker import FakeReranker, RerankError
 from api.app.retriever import ScoredChunk
 from eval import run
@@ -107,7 +108,7 @@ def test_regex_alternation_is_not_split_and_every_repo_regex_compiles():
     assert run._split("re:(a|b) is (c|d)|plain") == ["re:(a|b) is (c|d)", "plain"]
     phrases = [p for c in load_cases() for p in c.must_contain + c.must_not_contain]
     regexes = [p for p in phrases if p.startswith("re:")]
-    assert len(regexes) == 41
+    assert len(regexes) == 46
     for p in regexes:
         re.compile(p[3:])
 
@@ -432,6 +433,62 @@ def test_cli_rerank_with_the_fake_client_saves_rerank_details(patched, cases_csv
     data = json.loads(saved.read_text())
     assert data["candidates"] == 40
     assert all("rerank" in r for r in data["results"])
+
+
+class ByQuery:
+    """The matrix only for the query "comparison matrix"; step 7 for anything else."""
+
+    def search(self, question, k=5):
+        chunk = CHUNKS[0] if question == "comparison matrix" else CHUNKS[7]
+        return [ScoredChunk(chunk, 1.0)][:k]
+
+
+def test_check_retrieval_searches_the_rewrites_too_and_records_them():
+    assert CHUNKS[0].source_url == MATRIX
+    alone = run.check_retrieval(case(), ByQuery(), k=2)
+    assert not alone.passed and alone.rewrite is None
+    rewriter = FakeQueryRewriter(["comparison matrix"])
+    result = run.check_retrieval(case(), ByQuery(), k=2, rewriter=rewriter)
+    assert result.passed
+    assert result.rewrite["outcome"] == "rewritten"
+    assert result.rewrite["queries"] == ["comparison matrix"]
+
+
+def test_check_retrieval_searches_the_question_alone_when_the_rewriter_fails():
+    failing = FakeQueryRewriter(error=RewriteError("timeout"))
+    result = run.check_retrieval(case(), ByQuery(), k=2, rewriter=failing)
+    assert not result.passed
+    assert result.rewrite["outcome"] == "fallback reason=timeout"
+
+
+def test_cli_rewrite_and_rerank_with_the_fake_client_save_details(
+    patched, cases_csv, tmp_path, capsys
+):
+    def ask(prompt):
+        raise AssertionError("asked for confirmation")
+
+    out = tmp_path / "results"
+    args = [
+        "--rewrite",
+        "--rerank",
+        "--client",
+        "fake",
+        "--cases",
+        str(cases_csv),
+        "--out",
+        str(out),
+    ]
+    assert main(args, ask=ask) == 0
+    assert "Rewrite" in capsys.readouterr().out
+    [saved] = out.glob("*-retrieval-rewrite-rerank.json")
+    data = json.loads(saved.read_text())
+    assert data["rewriter"] == "claude-haiku-4-5-20251001"
+    assert all("rewrite" in r and "rerank" in r for r in data["results"])
+
+
+def test_rewrite_is_for_retrieval_only(cases_csv):
+    with pytest.raises(SystemExit):
+        main(["--rewrite", "--full", "--cases", str(cases_csv)])
 
 
 def test_rerank_is_for_retrieval_only(cases_csv):

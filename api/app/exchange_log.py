@@ -20,8 +20,53 @@ from api.app.config import Settings, settings
 
 log = logging.getLogger(__name__)
 
-Outcome = Literal["answered", "no_sources", "error"]
+# answered | not_found: answered, but the answer says it couldn't find something (review it) |
+# no_sources: retrieval found nothing, so Claude wasn't asked | error: Claude failed
+Outcome = Literal["answered", "not_found", "no_sources", "error"]
 Rating = Literal["up", "down"]
+
+# Lowercase phrases an answer uses when its sources don't have what was asked. The eval's
+# say_not_found check uses the same list. These are heuristics: a flagged answer may be fine
+# (a gap DSU's site really has), which is what review is for.
+NOT_FOUND = (
+    "couldn't find",
+    "could not find",
+    "didn't find",
+    "wasn't able to find",
+    "not able to find",
+    "don't have information",
+    "don't have details",
+    "don't have specific",
+    "don't have any",
+    "doesn't say",
+    "don't say",
+    "don't see",
+    "doesn't explain",
+    "don't explain",
+    "doesn't give",
+    "don't give",
+    "doesn't list",
+    "don't list",
+    "doesn't mention",
+    "don't mention",
+    "doesn't include",
+    "don't include",
+    "doesn't cover",
+    "don't cover",
+    "isn't listed",
+    "not listed",
+    "not covered",
+    "isn't covered",
+    "no information",
+    "no details",
+)
+
+
+def says_not_found(answer: str) -> bool:
+    """Whether the answer says it couldn't find something (any NOT_FOUND phrase, ignoring case
+    and curly quotes)."""
+    text = answer.lower().replace("’", "'").replace("‘", "'")
+    return any(phrase in text for phrase in NOT_FOUND)
 
 
 @dataclass
@@ -69,9 +114,14 @@ class ExchangeLog(Protocol):
         ...
 
     def recent(
-        self, rating: Rating | None = None, outcome: Outcome | None = None, limit: int = 20
+        self,
+        rating: Rating | None = None,
+        outcome: Outcome | None = None,
+        limit: int = 20,
+        to_review: bool = False,
     ) -> list[Reviewed]:
-        """The newest exchanges first, optionally only those with this rating or outcome."""
+        """The newest exchanges first, optionally only those with this rating or outcome. With
+        to_review, only those a person should read: thumbs-down, or not_found."""
         ...
 
 
@@ -168,7 +218,11 @@ class SqliteExchangeLog:
             return db.execute("DELETE FROM exchanges WHERE timestamp < ?", (_iso(cutoff),)).rowcount
 
     def recent(
-        self, rating: Rating | None = None, outcome: Outcome | None = None, limit: int = 20
+        self,
+        rating: Rating | None = None,
+        outcome: Outcome | None = None,
+        limit: int = 20,
+        to_review: bool = False,
     ) -> list[Reviewed]:
         where, params = [], []
         if rating:
@@ -177,6 +231,8 @@ class SqliteExchangeLog:
         if outcome:
             where.append("e.outcome = ?")
             params.append(outcome)
+        if to_review:
+            where.append("(f.rating = 'down' OR e.outcome = 'not_found')")
         columns = ", ".join(f"e.{c.strip()}" for c in COLUMNS.split(","))
         sql = (
             f"SELECT {columns}, f.rating, f.comment, f.rated_at FROM exchanges e"
@@ -209,7 +265,11 @@ class NullExchangeLog:
         return 0
 
     def recent(
-        self, rating: Rating | None = None, outcome: Outcome | None = None, limit: int = 20
+        self,
+        rating: Rating | None = None,
+        outcome: Outcome | None = None,
+        limit: int = 20,
+        to_review: bool = False,
     ) -> list[Reviewed]:
         return []
 
@@ -251,7 +311,10 @@ def print_reviewed(items: list[Reviewed]) -> None:
 def main(argv: list[str] | None = None, config: Settings = settings) -> None:
     parser = argparse.ArgumentParser(description="Review and clean up logged /chat exchanges.")
     commands = parser.add_subparsers(dest="command", required=True)
-    review = commands.add_parser("review", help="recent thumbs-down exchanges, newest first")
+    review = commands.add_parser(
+        "review",
+        help="recent thumbs-down answers and answers that say they couldn't find something",
+    )
     review.add_argument("-n", "--limit", type=int, default=20)
     unanswered = commands.add_parser(
         "unanswered", help="recent questions retrieval found no sources for (missing content)"
@@ -268,8 +331,11 @@ def main(argv: list[str] | None = None, config: Settings = settings) -> None:
 
     store = get_exchange_log(config)
     if args.command == "review":
-        items = store.recent(rating="down", limit=args.limit)
-        print(f"{len(items)} thumbs-down exchange(s), newest first\n")
+        items = store.recent(to_review=True, limit=args.limit)
+        print(
+            f"{len(items)} exchange(s) to review (thumbs-down, or outcome=not_found: the answer "
+            "says it couldn't find something), newest first\n"
+        )
         print_reviewed(items)
     elif args.command == "unanswered":
         items = store.recent(outcome="no_sources", limit=args.limit)
