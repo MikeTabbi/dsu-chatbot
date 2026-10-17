@@ -261,3 +261,37 @@ def test_repo_synonyms_file_loads():
     groups = load_synonyms(SYNONYMS_PATH)
     assert ["club", "organization", "student organization"] in groups
     assert Settings(_env_file=None).synonyms_file == "api/app/synonyms.yaml"
+
+
+@pytest.mark.parametrize(
+    "question, admissions",
+    [
+        ("What are the requirements for enrolling here at Delaware State University", True),
+        ("How do I get into DSU?", True),
+        ("What do I need to apply to DSU as a freshman?", True),
+        ("What are the requirements to enroll at DSU?", True),
+        ("How do I enroll in classes?", False),
+        ("How do I apply for housing?", False),
+        ("How do I get in touch with financial aid?", False),
+    ],
+)
+def test_admissions_wording_adds_admission_terms(question, admissions):
+    retriever = LocalKeywordRetriever([], synonyms=load_synonyms(SYNONYMS_PATH))
+    assert ("admission requirement" in retriever.expand(question)) is admissions
+
+
+def test_enrolling_finds_admissions_and_dual_enrollment_still_finds_its_page():
+    chunks = [
+        chunk("Undergraduate Students > ADMISSIONS REQUIREMENTS", "A 2.0 GPA.", url="/ugrad"),
+        chunk(
+            "Dual Enrollment Program > How To enroll",
+            "Take college courses while enrolled in high school.",
+            url="/dual",
+        ),
+        *(chunk(f"Housing > Step {i}", f"Housing step {i}.", url=f"/h/{i}") for i in range(6)),
+    ]
+    retriever = LocalKeywordRetriever(chunks, synonyms=load_synonyms(SYNONYMS_PATH))
+    top = retriever.search("What are the requirements for enrolling here?", k=1)
+    assert top[0].chunk.source_url.endswith("/ugrad")
+    top = retriever.search("How does dual enrollment work?", k=1)
+    assert top[0].chunk.source_url.endswith("/dual")
