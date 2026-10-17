@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.9.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.9.1"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
   const PANEL_CLOSE_MS = 150; // the panel's closing fade in the CSS (.panel.closing)
@@ -1117,7 +1117,7 @@
     }
 
     /**
-     * Thumbs up / down beside an answer, sent to POST /feedback with the answer's request ID.
+     * Thumbs up / down below an answer, sent to POST /feedback with the answer's request ID.
      * They show when the answer is hovered or a thumb has keyboard focus, and stay visible once
      * one is chosen. Rating again replaces the earlier rating.
      */
@@ -1205,16 +1205,16 @@
      * The view scrolls to the start of the new message, so a long answer is read from the top,
      * unless the student has scrolled up to read: then it stays put and "New message" appears.
      */
-    function addMessage(kind, at, fill, beside) {
+    function addMessage(kind, at, fill, below) {
       const el = document.createElement("div");
       el.className = `message ${kind}`;
       fill(el);
       let bubble = el;
-      if (beside) {
-        // Something next to the bubble, like the feedback buttons.
+      if (below) {
+        // Something under the bubble, like the feedback buttons.
         bubble = document.createElement("div");
         bubble.className = "bubble-row";
-        bubble.append(el, beside());
+        bubble.append(el, below());
       }
       let added = bubble;
       if (typeof at === "number") {

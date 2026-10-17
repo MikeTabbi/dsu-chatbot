@@ -568,11 +568,17 @@ button {
   margin-left: 0;
 }
 
-/* An answer and its thumbs up / down, side by side. */
+/* Answers use the full width beside the avatar. */
+.message-group.bot {
+  max-width: calc(100% - 36px);
+}
+
+/* An answer with its thumbs up / down below it, so the bubble keeps the full width. */
 .bubble-row {
   display: flex;
-  align-items: flex-end;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   max-width: 100%;
 }
 
@@ -587,7 +593,9 @@ button {
 .feedback {
   display: flex;
   flex: none;
+  align-items: center;
   gap: 2px;
+  margin-left: -4px; /* line the thumb icons up with the bubble's edge */
   opacity: 0;
   transition: opacity 0.15s ease;
 }
