@@ -1303,8 +1303,8 @@ textarea:focus-visible {
   margin-top: -24px;
 }
 
-/* Wide screens: a centered 800px column. Each message takes a little under half of it, with
-   more space between messages. */
+/* Wide screens: a centered 800px column, with more space between messages. Your messages take
+   a little under half of it; answers get a comfortable reading width (below). */
 .fullscreen .messages,
 .fullscreen .notice,
 .fullscreen .form,
@@ -1326,6 +1326,12 @@ textarea:focus-visible {
 
 .fullscreen .message-group > .message {
   max-width: 100%;
+}
+
+/* Answers: up to 720px (about 80 characters a line), never wider than the column beside the
+   avatar. The compact panel keeps its own width (.message-group.bot above). */
+.fullscreen .message-group.bot {
+  max-width: min(720px, calc(100% - 36px));
 }
 
 /* ---- Phones: the panel fills the screen --------------------------------------------------- */
