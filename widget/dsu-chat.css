@@ -974,6 +974,104 @@ textarea:focus-visible {
   }
 }
 
+/* "Keep my conversations on this device" switch. The real checkbox is hidden visually but still
+   gets focus and clicks; the track and thumb draw the switch. On vs. off is shown by the thumb's
+   position and by the help text below, not by color alone. */
+.keep {
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.keep-switch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.keep-toggle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.keep-track {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: #767c86; /* 3:1 against white, so the off switch is still visible */
+  transition: background 0.15s ease;
+}
+
+.keep-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(35, 31, 32, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.keep-toggle:checked + .keep-track {
+  background: var(--blue);
+}
+
+.keep-toggle:checked + .keep-track::after {
+  transform: translateX(16px);
+}
+
+.keep-toggle:focus-visible + .keep-track {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.keep-help {
+  margin: 6px 0 0 46px; /* lines up under the label, past the switch */
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Shown above the messages of a reopened conversation: Jada doesn't see them. */
+.reopened-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.reopened-note::before,
+.reopened-note::after {
+  content: "";
+  flex: 1;
+  min-width: 16px;
+  border-top: 1px solid var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keep-track,
+  .keep-track::after {
+    transition: none;
+  }
+}
+
 /* ---- Full screen: center the content like a page ------------------------------------------ */
 
 .fullscreen .hero {
@@ -1010,6 +1108,7 @@ textarea:focus-visible {
    more space between messages. */
 .fullscreen .messages,
 .fullscreen .notice,
+.fullscreen .keep,
 .fullscreen .form,
 .fullscreen .history-body {
   padding-left: max(28px, calc((100% - 800px) / 2));

@@ -1,7 +1,8 @@
 // Tests for saved conversations (Past Conversations). Run with: node --test widget/tests/
 //
-// The storage functions take the storage object as an argument, so these tests pass a small
-// in-memory stand-in for localStorage, and one that throws like a blocked browser does.
+// The storage functions take the storage object as an argument, so these tests pass small
+// in-memory stand-ins for localStorage and sessionStorage, and one that throws like a blocked
+// browser does.
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
@@ -12,7 +13,10 @@ const {
   upsertConversation,
   loadHistory,
   saveHistory,
+  openHistory,
+  setKeepOnDevice,
   HISTORY_KEY,
+  KEEP_KEY,
   LEGACY_KEY,
   MAX_CONVERSATIONS,
   MAX_AGE_DAYS,
@@ -146,4 +150,83 @@ test("times are general: minutes, hours, days", () => {
   assert.equal(timeAgo(NOW - DAY, NOW), "1 Day Ago");
   assert.equal(timeAgo(NOW - 3 * DAY - 5 * 60 * MIN, NOW), "3 Days Ago");
   assert.equal(timeAgo(NOW + MIN, NOW), "Just now", "a clock that's slightly off never shows a negative time");
+});
+
+test("conversations are kept for 7 days", () => {
+  assert.equal(MAX_AGE_DAYS, 7);
+  const items = [convo("six", NOW - 6 * DAY), convo("eight", NOW - 8 * DAY)];
+  assert.deepEqual(pruneHistory(items, NOW).map((c) => c.id), ["six"]);
+});
+
+test("by default, conversations are in sessionStorage", () => {
+  const local = memoryStorage();
+  const session = memoryStorage();
+  saveHistory(session, [convo("a", NOW - 1000)]);
+  const { keep, items } = openHistory(local, session, NOW);
+  assert.equal(keep, false);
+  assert.deepEqual(items.map((c) => c.id), ["a"]);
+  assert.equal(local.data.size, 0, "nothing written to localStorage");
+});
+
+test("conversations an older version left in localStorage move to sessionStorage", () => {
+  const legacy = { updated: NOW - DAY, messages: [{ role: "user", text: "Old one" }] };
+  const local = memoryStorage({ [LEGACY_KEY]: JSON.stringify(legacy) });
+  saveHistory(local, [convo("a", NOW - 1000)]);
+  local.setItem(LEGACY_KEY, JSON.stringify(legacy));
+  const session = memoryStorage();
+  saveHistory(session, [convo("a", NOW - 1000), convo("b", NOW - 500)]);
+
+  const { keep, items } = openHistory(local, session, NOW);
+  assert.equal(keep, false);
+  // "a" isn't duplicated; the legacy conversation is added; newest first.
+  assert.equal(items.length, 3);
+  assert.deepEqual(items.slice(0, 2).map((c) => c.id), ["b", "a"]);
+  assert.equal(items[2].title, "Old one");
+  assert.equal(local.getItem(HISTORY_KEY), null, "removed from localStorage");
+  assert.equal(local.getItem(LEGACY_KEY), null, "legacy key removed");
+  assert.equal(loadHistory(session, NOW).length, 3, "written to sessionStorage");
+});
+
+test("turning keep on moves conversations to localStorage", () => {
+  const local = memoryStorage();
+  const session = memoryStorage();
+  const items = [convo("a", NOW - 1000)];
+  saveHistory(session, items);
+
+  assert.equal(setKeepOnDevice(local, session, true, items), true);
+  assert.equal(local.getItem(KEEP_KEY), "yes");
+  assert.deepEqual(loadHistory(local, NOW).map((c) => c.id), ["a"]);
+  assert.equal(session.getItem(HISTORY_KEY), null, "removed from sessionStorage");
+
+  // The next visit (a new session) reads them from localStorage.
+  const reopened = openHistory(local, memoryStorage(), NOW);
+  assert.equal(reopened.keep, true);
+  assert.deepEqual(reopened.items.map((c) => c.id), ["a"]);
+});
+
+test("turning keep off moves conversations back to sessionStorage", () => {
+  const local = memoryStorage({ [KEEP_KEY]: "yes" });
+  const session = memoryStorage();
+  const items = [convo("a", NOW - 1000)];
+  saveHistory(local, items);
+
+  assert.equal(setKeepOnDevice(local, session, false, items), true);
+  assert.equal(local.getItem(KEEP_KEY), null);
+  assert.equal(local.getItem(HISTORY_KEY), null, "removed from localStorage");
+  assert.deepEqual(loadHistory(session, NOW).map((c) => c.id), ["a"]);
+  assert.equal(openHistory(local, session, NOW).keep, false);
+});
+
+test("keep can't be turned on when the browser blocks storage", () => {
+  const session = memoryStorage();
+  const items = [convo("a", NOW - 1000)];
+  saveHistory(session, items);
+  assert.deepEqual(openHistory(blockedStorage, session, NOW).items.map((c) => c.id), ["a"]);
+  assert.equal(setKeepOnDevice(blockedStorage, session, true, items), false);
+  assert.ok(session.getItem(HISTORY_KEY), "left where it was");
+
+  // The widget's stand-in for blocked storage keeps nothing, so the setting can't stick either.
+  const standIn = { getItem: () => null, setItem() {}, removeItem() {} };
+  assert.equal(setKeepOnDevice(standIn, session, true, items), false);
+  assert.ok(session.getItem(HISTORY_KEY), "left where it was");
 });

@@ -100,25 +100,37 @@ rights with Marketing & Communications before going live.
   Conversation reopens the most recent saved conversation. See Past Conversations lists the
   saved ones. The back arrow in the chat header returns to the home screen.
 - **Saved conversations (Past Conversations):**
-  - Kept in the browser's `localStorage` under `dsu-chat:conversations`, on this device only.
-    Nothing is sent anywhere, and nothing is tied to a student, so this stays within decision
-    0001 (no logins, no student records).
+  - Kept in the browser only, under `dsu-chat:conversations`. Nothing is sent anywhere, and
+    nothing is tied to a student, so this stays within decision 0001 (no logins, no student
+    records).
+  - **By default they're in `sessionStorage`,** so they're gone when the browser is closed. This
+    is the safe choice for shared lab and library computers.
+  - **"Keep my conversations on this device"** is a switch on the Past Conversations screen. Turning
+    it on moves the list to `localStorage`, where it survives closing the browser; turning it off
+    moves it back to `sessionStorage`. The choice itself is stored as `dsu-chat:keep-on-device`
+    (`KEEP_KEY`) in `localStorage`. The text under the switch says which mode is on and warns
+    that anyone using the browser can see kept conversations.
+  - Conversations saved in `localStorage` by version 0.8 or earlier (when the switch didn't exist)
+    are moved into `sessionStorage` the first time 0.9 loads, unless the switch is on.
   - Each conversation keeps its questions and answers (with sources), up to 40 messages. Only
     answered questions are saved, not error messages.
-  - Limits: the last 10 conversations, each kept for up to 30 days after its last message. Older
+  - Limits: the last 10 conversations, each kept for up to 7 days after its last message. Older
     ones are removed when the widget loads. The limits are `MAX_CONVERSATIONS` and
     `MAX_AGE_DAYS` at the top of the storage section in `dsu-chat.js`. If you change them,
-    change the note on the Past Conversations screen too.
-  - The screen says conversations are saved on this device and visible to anyone using the
-    browser, which matters on shared lab and library computers. **Delete all conversations**
-    (with a confirm step) clears them.
+    change the `keepOn` text in `MESSAGES` too.
+  - **Delete all conversations** (with a confirm step) clears both storages.
   - The list shows each conversation's last answer, "Ask DSU · 2 Hrs Ago", and a ">" arrow, with a
     light gray line between rows. Screen readers also hear the first question.
   - Tapping a conversation reopens it, and new questions are added to it. Reopened answers go
     through the same safe rendering as new ones.
+  - **Reopened conversations don't give the assistant memory.** Each question is answered on its
+    own, so a reopened conversation shows a divider note under the earlier messages saying the
+    assistant doesn't see them, and the input reads "Ask a new question (include the details)".
+    A new conversation goes back to "Ask a question about DSU".
   - The single conversation version 0.5 saved (`dsu-chat:last-conversation`) is moved into the
-    list the first time the new version loads.
-  - If the browser blocks storage (some private modes), the chat still works but nothing is kept.
+    list the first time a newer version loads.
+  - If the browser blocks storage (some private modes), the chat still works but nothing is kept,
+    and the switch can't be turned on (it says so).
 - **Who and when:** under each message is "You" or the assistant's name, a dot, and how long
   ago: "Just now", "5 Mins Ago", "2 Hrs Ago", "3 Days Ago" (`timeAgo()` in `dsu-chat.js`). The times update
   every minute while the panel is open. Conversations saved before version 0.7 have no time per

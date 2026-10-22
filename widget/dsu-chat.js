@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.8.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.9.0"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
 
@@ -36,6 +36,18 @@
     retry: "Your question is back in the box, so you can send it again.",
     feedbackThanks: "Thanks!",
     feedbackFailed: "Sorry, that didn't send. Please try again.",
+    askPlaceholder: "Ask a question about DSU",
+    askAgainPlaceholder: "Ask a new question (include the details)",
+    // Shown when a past conversation is reopened. {name} is the assistant's name.
+    reopened:
+      "Earlier messages. {name} answers each question on its own and doesn't see the ones " +
+      "above, so include the details again.",
+    keepOff:
+      "Off: this list is cleared when you close this browser. Turn it on only on your own device.",
+    keepOn:
+      "On: the last 10 conversations are kept in this browser for 7 days. Anyone who uses this " +
+      "browser can see them, so leave this off on shared computers.",
+    keepFailed: "This browser won't let me keep conversations, so the setting couldn't change.",
   };
 
   // Thumbs icons (Material Icons thumb_up / thumb_down, Apache 2.0), drawn by svgIcon().
@@ -271,12 +283,15 @@
   // The widget: launcher button, chat panel, and the call to POST /chat.
   // ---------------------------------------------------------------------------------------------
 
-  // Saved conversations live in the browser's localStorage, on this device only (see README).
-  // If you change the limits, change the note in the Past Conversations screen (SHELL) too.
+  // Saved conversations live in the browser only (see README). By default they're in
+  // sessionStorage, so closing the browser clears them (shared campus computers). "Keep my
+  // conversations on this device" moves them to localStorage, kept for MAX_AGE_DAYS.
+  // If you change the limits, change MESSAGES.keepOn too.
   const HISTORY_KEY = "dsu-chat:conversations";
   const LEGACY_KEY = "dsu-chat:last-conversation"; // the one conversation version 0.5 saved
+  const KEEP_KEY = "dsu-chat:keep-on-device"; // "yes" when the student turned the switch on
   const MAX_CONVERSATIONS = 10;
-  const MAX_AGE_DAYS = 30;
+  const MAX_AGE_DAYS = 7;
   const MAX_SAVED_MESSAGES = 40; // per conversation
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -380,16 +395,24 @@
             ${WINDOW_BUTTONS}
           </header>
           <p class="notice">
-            Conversations are saved in this browser on this device only, so anyone who uses this
-            browser can see them. The last 10 are kept for up to 30 days.
+            This list is stored only in this browser. Close the browser on a shared computer, or
+            delete the conversations below, to clear it.
           </p>
+          <div class="keep">
+            <label class="keep-switch">
+              <input class="keep-toggle" type="checkbox" role="switch" aria-describedby="keep-help" />
+              <span class="keep-track" aria-hidden="true"></span>
+              <span class="keep-label">Keep my conversations on this device</span>
+            </label>
+            <p class="keep-help" id="keep-help"></p>
+          </div>
           <div class="history-body">
             <ul class="history" aria-label="Past conversations"></ul>
             <p class="history-empty" hidden>No past conversations yet.</p>
             <div class="history-actions">
               <button class="delete-all" type="button">Delete all conversations</button>
               <div class="confirm" role="group" aria-labelledby="confirm-text" hidden>
-                <p id="confirm-text">Delete all saved conversations on this device? This can't be undone.</p>
+                <p id="confirm-text">Delete all saved conversations in this browser? This can't be undone.</p>
                 <div class="confirm-buttons">
                   <button class="confirm-delete" type="button">Delete all</button>
                   <button class="confirm-cancel" type="button">Cancel</button>
@@ -495,10 +518,67 @@
     return pruned;
   }
 
-  /** window.localStorage, or a stand-in that keeps nothing if the browser blocks it. */
-  function browserStorage() {
+  /** Deletes the saved list (and an older version's single conversation). Never throws. */
+  function clearHistory(storage) {
+    saveHistory(storage, []);
     try {
-      const storage = window.localStorage;
+      storage.removeItem(LEGACY_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  /** True when the student turned on "Keep my conversations on this device". */
+  function keepsOnDevice(local) {
+    try {
+      return local.getItem(KEEP_KEY) === "yes";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The saved conversations, and whether they're kept on this device. Kept: they're in local
+   * (localStorage). Not kept (the default): they're in session (sessionStorage), and anything an
+   * older version left in local moves to session and is deleted from local, so it doesn't linger
+   * on a shared computer. Never throws.
+   */
+  function openHistory(local, session, now) {
+    if (keepsOnDevice(local)) return { keep: true, items: loadHistory(local, now) };
+    const leftover = loadHistory(local, now); // also converts LEGACY_KEY
+    clearHistory(local);
+    let items = loadHistory(session, now);
+    if (leftover.length) {
+      const ids = new Set(items.map((c) => c.id));
+      items = pruneHistory([...items, ...leftover.filter((c) => !ids.has(c.id))], now);
+      saveHistory(session, items);
+    }
+    return { keep: false, items };
+  }
+
+  /**
+   * Turns "Keep my conversations on this device" on or off, moving items to the matching
+   * storage and deleting them from the other. False (and nothing changes) if the browser
+   * won't store the setting.
+   */
+  function setKeepOnDevice(local, session, keep, items) {
+    try {
+      if (keep) local.setItem(KEEP_KEY, "yes");
+      else local.removeItem(KEEP_KEY);
+    } catch {
+      return false;
+    }
+    if (keepsOnDevice(local) !== keep) return false; // a stand-in storage that keeps nothing
+    saveHistory(keep ? local : session, items);
+    clearHistory(keep ? session : local);
+    return true;
+  }
+
+  /** window.localStorage or window.sessionStorage, or a stand-in that keeps nothing if the
+   * browser blocks it. */
+  function browserStorage(name) {
+    try {
+      const storage = window[name];
       if (storage) return storage;
     } catch {
       // blocked (for example, third-party storage disabled)
@@ -570,8 +650,12 @@
     const formError = $("#form-error");
     const send = $(".send");
     let busy = false;
-    const storage = browserStorage();
-    let history = loadHistory(storage, Date.now()); // saved conversations, newest first
+    const local = browserStorage("localStorage");
+    const session = browserStorage("sessionStorage");
+    // history: saved conversations, newest first. keep: whether they're kept on this device.
+    let { keep, items: history } = openHistory(local, session, Date.now());
+    const store = () => (keep ? local : session);
+    const keepToggle = $(".keep-toggle");
     let conversation = null; // the conversation on screen, once it has a saved question
     // What .messages shows: a conversation id, "new" for a new one, or null for nothing yet.
     let shownId = null;
@@ -621,6 +705,7 @@
       messages.textContent = "";
       conversation = null;
       shownId = "new";
+      input.placeholder = MESSAGES.askPlaceholder;
       addBotText(MESSAGES.welcome, Date.now());
       showChat();
     }
@@ -638,6 +723,13 @@
         }
         conversation = saved;
         shownId = saved.id;
+        // Each question is still answered on its own: say so where new questions start.
+        const note = document.createElement("p");
+        note.className = "reopened-note";
+        note.setAttribute("role", "note");
+        note.textContent = MESSAGES.reopened.replace("{name}", options.title);
+        messages.appendChild(note);
+        input.placeholder = MESSAGES.askAgainPlaceholder;
       }
       showChat();
       const last = messages.lastElementChild;
@@ -672,7 +764,7 @@
       conversation.updated = now;
       conversation.title = conversationTitle(conversation.messages);
       history = upsertConversation(history, conversation, now);
-      saveHistory(storage, history);
+      saveHistory(store(), history);
     }
 
     /** Fills the Resume and Past cards. Text only, through textContent. */
@@ -686,7 +778,9 @@
         : "Start one to see it here.";
       const n = history.length;
       $(".past-meta").textContent = n
-        ? `${n} saved ${n === 1 ? "conversation" : "conversations"} on this device`
+        ? `${n} saved ${n === 1 ? "conversation" : "conversations"} ${
+            keep ? "on this device" : "until you close this browser"
+          }`
         : "No past conversations yet";
     }
 
@@ -726,8 +820,26 @@
       confirmBox.hidden = true;
     }
 
+    function showKeep() {
+      keepToggle.checked = keep;
+      $("#keep-help").textContent = keep ? MESSAGES.keepOn : MESSAGES.keepOff;
+    }
+
+    function changeKeep() {
+      const want = keepToggle.checked;
+      if (setKeepOnDevice(local, session, want, history)) {
+        keep = want;
+        historyStatus.textContent = keep ? MESSAGES.keepOn : MESSAGES.keepOff;
+      } else {
+        historyStatus.textContent = MESSAGES.keepFailed;
+      }
+      showKeep();
+      updateHome();
+    }
+
     function showPast() {
       history = pruneHistory(history, Date.now());
+      showKeep();
       renderHistory();
       historyStatus.textContent = "";
       showView(pastView);
@@ -748,7 +860,8 @@
 
     function confirmDeleteAll() {
       history = [];
-      saveHistory(storage, history);
+      clearHistory(local);
+      clearHistory(session);
       if (conversation) {
         // The open chat was saved, so it's gone too.
         messages.textContent = "";
@@ -777,6 +890,7 @@
     resume.addEventListener("click", resumeLast);
     $(".past").addEventListener("click", showPast);
     deleteAll.addEventListener("click", askDeleteAll);
+    keepToggle.addEventListener("change", changeKeep);
     $(".confirm-cancel").addEventListener("click", cancelDeleteAll);
     $(".confirm-delete").addEventListener("click", confirmDeleteAll);
     panel.addEventListener("keydown", (event) => {
@@ -1122,8 +1236,11 @@
       upsertConversation,
       loadHistory,
       saveHistory,
+      openHistory,
+      setKeepOnDevice,
       HISTORY_KEY,
       LEGACY_KEY,
+      KEEP_KEY,
       MAX_CONVERSATIONS,
       MAX_AGE_DAYS,
     };
