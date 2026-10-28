@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.9.3"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.10.0"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
   const PANEL_CLOSE_MS = 150; // the panel's closing fade in the CSS (.panel.closing)
@@ -25,8 +25,8 @@
   const MESSAGES = {
     welcome:
       "Hi! I'm Jada, how can I help you today? You can ask me a question about DSU, like housing, admissions, or registration. " +
-      "I answer each question on its own and don't remember earlier ones, so include the " +
-      "details every time.",
+      "I remember your last few questions in this conversation, so you can ask a follow-up " +
+      "like \"how much does it cost?\"",
     loading: "Looking that up…",
     unavailable:
       "Sorry, I can't answer right now. Please try again in a few minutes, or visit desu.edu.",
@@ -52,6 +52,35 @@
       path: "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z",
     },
   ];
+
+  // Follow-ups: /chat gets the last few question-and-answer pairs of the conversation on screen,
+  // so "that page" can be understood. Keep HISTORY_TURNS equal to the backend's
+  // CHAT_HISTORY_TURNS; long answers are cut so the request stays small (MAX_REQUEST_BYTES).
+  const HISTORY_TURNS = 3;
+  const HISTORY_ANSWER_CHARS = 1500;
+
+  /**
+   * The history to send with the next question: the last `turns` answered questions of this
+   * conversation's saved messages, oldest first, as [{ question, answer }]. A question without an
+   * answer after it (it failed) isn't a turn.
+   */
+  function recentTurns(messages, turns = HISTORY_TURNS, maxAnswer = HISTORY_ANSWER_CHARS) {
+    const pairs = [];
+    const list = Array.isArray(messages) ? messages : [];
+    for (let i = 0; i + 1 < list.length; i++) {
+      const asked = list[i];
+      const answered = list[i + 1];
+      if (asked?.role !== "user" || typeof asked.text !== "string") continue;
+      if (answered?.role !== "bot" || typeof answered.data?.answer !== "string") continue;
+      const answer = answered.data.answer;
+      pairs.push({
+        question: asked.text,
+        answer: answer.length > maxAnswer ? answer.slice(0, maxAnswer) : answer,
+      });
+      i++;
+    }
+    return turns > 0 ? pairs.slice(-turns) : [];
+  }
 
   /** The fetch() arguments that send a thumbs up or down for one answer to POST /feedback. */
   function feedbackRequest(apiUrl, requestId, rating) {
@@ -1042,11 +1071,13 @@
         el.append(dots, srOnly(document, MESSAGES.loading));
       });
 
+      // Only the conversation on screen: a new conversation starts with no history.
+      const history = recentTurns(conversation ? conversation.messages : []);
       try {
         const response = await fetch(`${options.apiUrl}/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question }),
+          body: JSON.stringify({ question, history }),
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
         const data = await response.json().catch(() => null);
@@ -1334,6 +1365,9 @@
       formatDate,
       feedbackRequest,
       errorMessage,
+      recentTurns,
+      HISTORY_TURNS,
+      MESSAGES,
       conversationTitle,
       timeAgo,
       pruneHistory,

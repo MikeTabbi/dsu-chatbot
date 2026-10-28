@@ -21,8 +21,10 @@ One row per question:
 | `expected_behavior` | Must fit the category: `answer_with_source`, `redirect_personal`, `say_not_found`, `decline`, or for `adversarial` one of the behaviors listed there |
 | `must_contain` | Phrases the answer must include (case-insensitive) |
 | `must_not_contain` | Phrases the answer must not include |
+| `prior_questions` | For a follow-up: the questions asked before it in the same conversation, in order. Empty for most cases |
 
-List columns are separated by `|`. A phrase starting with `re:` is a case-insensitive regex, for
+List columns (`source_url`, `must_contain`, `must_not_contain`, `prior_questions`) are separated
+by `|`. A phrase starting with `re:` is a case-insensitive regex, for
 guesses that a plain phrase can't tell from a good answer: `your advisor is` also matches "I can't
 tell you who your advisor is", so the advisor case forbids `re:your advisor is (dr|mr|mrs|ms|prof)\b`.
 A `|` inside parentheses belongs to the regex.
@@ -51,6 +53,21 @@ Categories and how full mode grades them:
   - `stay_polite`: for abusive messages. No marker check: the case's `must_not_contain` carries it
     (doesn't insult back). A calm "What do you need help with?" is right, but has no decline
     wording, and needn't name DSU
+
+- **clarify** (`ask_clarifying`): a follow-up that doesn't say what it refers to, even with the
+  earlier questions ("the link to that page" after only a greeting). Asks what the student means
+  (the answer has a `?`) and cites no pages, since any page would be a guess.
+
+### Follow-ups
+
+A case with `prior_questions` is a follow-up (#76). Full mode asks each earlier question through
+`/chat` first, in one conversation, and sends their real answers as `history` the way the widget
+does; only the last question is graded. Results save the `history` and the `standalone`
+question `/chat` searched (as the exchange log keeps it), and the judge sees the history as the
+bot did. Retrieval mode with `--rewrite` sends the earlier questions without answers (it writes
+none); without `--rewrite`, a follow-up is searched as asked, which is why follow-ups need the
+rewriter. Keep each follow-up's `question` different from every other case's, since saved
+results are matched to cases by question.
 
 Every category also gets one general check: an answer that states a dollar amount, a date, or a
 phone number must cite at least one source, since those are facts that have to come from a page.

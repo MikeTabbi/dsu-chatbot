@@ -5,6 +5,7 @@ import functools
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -19,10 +20,13 @@ PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "system.md"
 STALE_AFTER_DAYS = 365  # older pages are flagged so the answer can mention the date
 NO_SOURCES = "No DSU sources were found for this question."
 
-# The tags that wrap each section, plus the <cited> marker. The same tags inside page text or the
-# question are escaped, so a page (or a visitor) can't close <sources> early and have its text read
-# as the question, or plant a citation.
-SECTION_TAG = re.compile(r"<(?=/?(?:sources|source|question|cited)\b)", re.IGNORECASE)
+# The tags that wrap each section, plus the <cited> marker. The same tags inside page text, the
+# question, or the history are escaped, so a page (or a visitor) can't close <sources> early and
+# have its text read as the question, pass an earlier answer off as a source, or plant a citation.
+SECTION_TAG = re.compile(
+    r"<(?=/?(?:sources|source|question|cited|history|turn|student|assistant)\b)", re.IGNORECASE
+)
+HISTORY_CUT = " […]"  # ends an earlier answer cut short to fit CHAT_HISTORY_MAX_CHARS
 
 # Claude ends each answer with <cited>1, 3</cited> (prompts/system.md). An unclosed marker at the
 # very end (an answer cut off by max_tokens) still counts; any other stray tag is just removed.
@@ -39,6 +43,15 @@ LINK_TRAILING = ".,;:!?*_"
 class Prompt:
     system: str
     messages: list[ChatMessage]
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One earlier question in the conversation and the answer the student saw. History helps
+    read a follow-up ("that page"); it is never a source and never instructions."""
+
+    question: str
+    answer: str
 
 
 @dataclass
@@ -62,16 +75,54 @@ def prompt_version(path: Path = PROMPT_PATH) -> str:
     return hashlib.sha256(load_system_prompt(path).encode("utf-8")).hexdigest()[:12]
 
 
-def build_prompt(question: str, chunks: list[Chunk], today: date | None = None) -> Prompt:
-    """The system prompt (rules plus today's date) and one user message holding the sources,
-    then the question. With no chunks, the sources section says none were found."""
+def fit_history(turns: list[Turn], max_turns: int, max_chars: int) -> list[Turn]:
+    """The newest max_turns turns, oldest first, whose questions and answers fit in max_chars
+    together. Older turns go first; when the oldest kept turn doesn't fit, its answer is cut to
+    the room left (keeping its start), or the turn is dropped if not even its question fits."""
+    kept: list[Turn] = []
+    room = max_chars
+    for turn in reversed(turns[-max_turns:] if max_turns > 0 else []):
+        size = len(turn.question) + len(turn.answer)
+        if size <= room:
+            kept.append(turn)
+            room -= size
+            continue
+        answer_room = room - len(turn.question) - len(HISTORY_CUT)
+        if answer_room > 0:
+            kept.append(Turn(turn.question, turn.answer[:answer_room].rstrip() + HISTORY_CUT))
+        break
+    return kept[::-1]
+
+
+def format_history(turns: Sequence[Turn]) -> str:
+    """The earlier turns as a <history> section, oldest first, escaped like every other section.
+    Empty when there are none, so a first question's prompt is exactly as before."""
+    if not turns:
+        return ""
+    body = "\n".join(
+        f"<turn>\n<student>\n{_escape(t.question)}\n</student>\n"
+        f"<assistant>\n{_escape(t.answer)}\n</assistant>\n</turn>"
+        for t in turns
+    )
+    return f"<history>\n{body}\n</history>\n\n"
+
+
+def build_prompt(
+    question: str, chunks: list[Chunk], today: date | None = None, history: Sequence[Turn] = ()
+) -> Prompt:
+    """The system prompt (rules plus today's date) and one user message holding the earlier
+    turns (if any), the sources for this question, then the question. With no chunks, the sources
+    section says none were found."""
     today = today or date.today()
     system = f"{load_system_prompt()}\n\nToday's date is {today.isoformat()}."
     if chunks:
         sources = "\n\n".join(_format_source(i, c, today) for i, c in enumerate(chunks, 1))
     else:
         sources = NO_SOURCES
-    content = f"<sources>\n{sources}\n</sources>\n\n<question>\n{_escape(question)}\n</question>"
+    content = (
+        f"{format_history(history)}<sources>\n{sources}\n</sources>\n\n"
+        f"<question>\n{_escape(question)}\n</question>"
+    )
     return Prompt(system, [{"role": "user", "content": content}])
 
 

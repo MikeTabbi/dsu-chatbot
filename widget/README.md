@@ -25,6 +25,7 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 | `tests/mock.test.js` | Checks that mock mode, thumbs up/down included, never makes a network request |
 | `tests/history.test.js` | Checks saved conversations: limits, expiry, moving the old save, blocked storage |
 | `tests/fluid.test.js` | Checks Show more, the Sources chip, and the New message button |
+| `tests/followup.test.js` | Checks the history sent with each question: last turns only, current conversation only |
 
 ## Embedding it on a site (Drupal)
 
@@ -137,9 +138,13 @@ rights with Marketing & Communications before going live.
 - **Full screen:** the button next to the X fills the browser window. Messages sit in a centered
   800px column. Your questions take a little under half of it, and answers are up to 720px wide,
   a comfortable reading width. Press it again to go back. Phones are always full screen, so it's hidden there.
-- **One question at a time:** each question is sent on its own. The backend doesn't get earlier
-  questions or answers, so a follow-up like "how much is it?" won't know what "it" means. The
-  welcome message tells students to include the details each time.
+- **Follow-ups:** each question is sent with the last 3 questions and answers of the
+  conversation on screen (`recentTurns()` in `dsu-chat.js`; `HISTORY_TURNS`, keep it equal to the
+  backend's `CHAT_HISTORY_TURNS`), so "how much does it cost?" or "the link to that page" can be
+  understood. A new conversation sends none, a question whose answer failed isn't sent, and
+  answers are cut to 1,500 characters to keep the request small. Nothing else leaves the
+  browser: saved conversations still live only on this device. The welcome message tells
+  students they can ask follow-ups.
 - **Answers:** shown with basic Markdown: **bold**, *italic*, bullet and numbered lists, and links.
 - **Long answers:** an answer taller than about 220px (`COLLAPSED_PX` in `dsu-chat.js`, also in the
   CSS) starts cut off, fading out at the bottom, with **Show more** under it. Show more slides
