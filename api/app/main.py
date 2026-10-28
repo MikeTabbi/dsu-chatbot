@@ -25,7 +25,14 @@ from api.app.exchange_log import (
     now,
     says_not_found,
 )
-from api.app.prompt import build_prompt, linked_sources, parse_citations, prompt_version
+from api.app.prompt import (
+    Turn,
+    build_prompt,
+    fit_history,
+    linked_sources,
+    parse_citations,
+    prompt_version,
+)
 from api.app.query_rewriter import (
     QueryRewriter,
     get_query_rewriter,
@@ -59,6 +66,9 @@ DAILY_LIMIT = (
 )
 FEEDBACK_TOO_FAST = "That's a lot of feedback at once. Please wait a minute and try again."
 BUSY_ANSWER = "The DSU assistant is busy right now. Please try again later, or visit desu.edu."
+BAD_HISTORY = "Sorry, I couldn't read the earlier conversation. Please start a new conversation."
+# More earlier turns than this is not a conversation the widget sends; refused before any work.
+MAX_HISTORY_ITEMS = 20
 
 app = FastAPI(title="DSU Chatbot API", version="0.1.0")
 
@@ -78,8 +88,17 @@ app.add_middleware(
 )
 
 
+class HistoryTurn(BaseModel):
+    """One earlier question in this conversation and the answer the student saw."""
+
+    question: str
+    answer: str
+
+
 class ChatRequest(BaseModel):
     question: str
+    # The conversation's earlier turns, oldest first, so a follow-up ("that page") can be read.
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=MAX_HISTORY_ITEMS)
 
 
 class Source(BaseModel):
@@ -233,7 +252,8 @@ def chat(
     exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
     limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
 ):
-    """Answer one question from retrieved DSU content, with the sources the answer cites."""
+    """Answer one question from retrieved DSU content, with the sources the answer cites. Earlier
+    turns, when sent, only help read a follow-up: this turn's sources are the only sources."""
     request_id = uuid.uuid4().hex
     start = time.perf_counter()
     question = request.question.strip()
@@ -243,6 +263,7 @@ def chat(
         raise HTTPException(
             422, f"Please keep your question under {config.chat_max_question_chars} characters."
         )
+    history = _history(request.history, config)
 
     # The daily budget counts Claude calls from every client, so credits are safe even when the
     # traffic comes from many addresses. A rewrite is a Claude call, so it counts; past the
@@ -250,24 +271,32 @@ def chat(
     budget = Limit("claude_daily_calls", config.claude_daily_call_budget, DAY)
     rewrites = rewriter is not None and rewriter.calls_claude
     allowed = not rewrites or limiter.hit("global:claude", [budget]) is None
-    rewritten = rewrite_or_original(rewriter, question, allowed)
+    rewritten = rewrite_or_original(rewriter, question, allowed, history)
+    # A follow-up is searched, reranked, and logged as its standalone question.
+    standalone = rewritten.standalone
     if rewritten.outcome != "off":
-        # How many queries, never what they say: they can repeat the question's personal details.
+        # Counts, never text: queries and the standalone question can repeat personal details.
         log.info(
-            "rewrite request_id=%s outcome=%s queries=%d latency_ms=%.0f",
+            "rewrite request_id=%s outcome=%s queries=%d history=%d standalone=%s latency_ms=%.0f",
             request_id,
             rewritten.outcome,
             len(rewritten.queries),
+            len(history),
+            "same" if standalone == question else "rewritten",
             rewritten.latency_ms,
         )
 
     k = config.chat_top_k
     n = max(k, config.reranker_candidates) if reranker else k
-    candidates = search_with_rewrites(retriever, question, rewritten.queries, n)
+    candidates = search_with_rewrites(retriever, standalone, rewritten.queries, n)
     chunks = [r.chunk for r in candidates[:k]]
+    # What the student typed in this conversation, so an answer's echo of it is redacted too.
+    typed = "\n".join([question, *(t.question for t in history)])
 
     def record(outcome: Outcome, answer: str, sources=(), reply: ClaudeReply | None = None):
-        _record(exchanges, request_id, start, question, answer, outcome, chunks, sources, reply)
+        _record(
+            exchanges, request_id, start, standalone, typed, answer, outcome, chunks, sources, reply
+        )
 
     if not chunks:
         _log_request(request_id, start, chunks, "no_content")
@@ -286,7 +315,7 @@ def chat(
     # A rerank is a second Claude call, so it counts too. Past the budget, keyword order answers.
     reranks = reranker is not None and reranker.calls_claude and len(candidates) > k
     allowed = not reranks or limiter.hit("global:claude", [budget]) is None
-    reranked = rerank_or_keyword(reranker, question, candidates, k, allowed)
+    reranked = rerank_or_keyword(reranker, standalone, candidates, k, allowed)
     if reranked.outcome != "keyword":
         log.info(
             "rerank request_id=%s outcome=%s latency_ms=%.0f",
@@ -296,7 +325,8 @@ def chat(
         )
     chunks = [r.chunk for r in reranked.results]
 
-    prompt = build_prompt(question, chunks)
+    # The question as asked, with the history to read it by; every source is from this turn.
+    prompt = build_prompt(question, chunks, history=history)
     try:
         reply = client.complete(prompt.system, prompt.messages)
     except ClaudeError as e:
@@ -348,6 +378,16 @@ def feedback(
     return FeedbackResponse(request_id=request.request_id, rating=request.rating)
 
 
+def _history(turns: list[HistoryTurn], config: Settings) -> list[Turn]:
+    """The earlier turns /chat uses: trimmed, the newest CHAT_HISTORY_TURNS that fit in
+    CHAT_HISTORY_MAX_CHARS. A turn with an empty question or one longer than a question may be
+    is refused with a 422, like a bad question: the widget never sends one."""
+    history = [Turn(t.question.strip(), t.answer.strip()) for t in turns]
+    if any(not t.question or len(t.question) > config.chat_max_question_chars for t in history):
+        raise HTTPException(422, BAD_HISTORY)
+    return fit_history(history, config.chat_history_turns, config.chat_history_max_chars)
+
+
 def _sources(chunks: list[Chunk]) -> list[Source]:
     """One source per URL, in retrieval order; the best-matching cited chunk names the section."""
     by_url: dict[str, Source] = {}
@@ -374,22 +414,25 @@ def _record(
     request_id: str,
     start: float,
     question: str,
+    typed: str,
     answer: str,
     outcome: Outcome,
     chunks: list[Chunk],
     sources: list[Source],
     reply: ClaudeReply | None,
 ) -> None:
-    """Store the exchange, redacted. A failing store is a warning: the student still gets the
-    answer. The warning never includes the question or answer, which could hold personal details."""
+    """Store the exchange, redacted: the (standalone) question, never the history. A failing store
+    is a warning: the student still gets the answer. The warning never includes the question or
+    answer, which could hold personal details."""
     try:
         exchanges.add(
             Exchange(
                 request_id=request_id,
                 timestamp=now(),
                 question=redact(question),
-                # Only what the student typed: DSU's own numbers in the answer stay readable.
-                answer=redact_echoes(answer, question),
+                # Only what the student typed (this question and the earlier ones): DSU's own
+                # numbers in the answer stay readable.
+                answer=redact_echoes(answer, typed),
                 outcome=outcome,
                 prompt_version=prompt_version(),
                 latency_ms=round((time.perf_counter() - start) * 1000),

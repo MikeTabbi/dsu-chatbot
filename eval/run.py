@@ -26,6 +26,7 @@ from api.app.main import (
     get_chat_retriever,
     get_settings,
 )
+from api.app.prompt import Turn
 from api.app.query_rewriter import (
     ClaudeQueryRewriter,
     QueryRewriter,
@@ -59,6 +60,8 @@ BEHAVIORS_FOR_CATEGORY = {
         "offer_support",  # responds with care and points to Counseling Services
         "stay_polite",  # answers abuse calmly; graded only by the case's phrases
     ),
+    # follow-ups that don't say what they refer to, even with the history (#76)
+    "clarify": ("ask_clarifying",),  # asks what the student means instead of guessing pages
 }
 
 # Lowercase markers for the behavior checks; NOT_FOUND comes from the exchange log, whose review
@@ -125,6 +128,8 @@ class Case:
     must_contain: list[str]
     must_not_contain: list[str]
     expected_answer: str = ""
+    # Asked first, in order, in the same conversation: the case's question is a follow-up (#76).
+    prior_questions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -143,6 +148,10 @@ class Result:
     rewrite: dict | None = None  # retrieval with --rewrite: outcome, queries, latency_ms, tokens
     # full: the chunks /chat gave Claude after reranking, in order (None: no exchange recorded)
     chunk_ids: list[str] | None = None
+    # follow-ups: the earlier turns sent as history ({"question", "answer"}; retrieval mode has
+    # no answers), and the standalone question /chat searched (full: as the exchange log keeps it)
+    history: list[dict] | None = None
+    standalone: str | None = None
 
 
 def _split(value: str) -> list[str]:
@@ -160,8 +169,9 @@ def _split(value: str) -> list[str]:
 
 
 def load_cases(path: Path | str = CASES_PATH) -> list[Case]:
-    """Every row of the eval CSV. Lists (source_url, must_contain, must_not_contain) are
-    separated by |. A phrase starting with "re:" is a case-insensitive regex."""
+    """Every row of the eval CSV. Lists (source_url, must_contain, must_not_contain,
+    prior_questions) are separated by |. A phrase starting with "re:" is a case-insensitive
+    regex."""
     cases = []
     with open(path, newline="", encoding="utf-8") as f:
         for line, row in enumerate(csv.DictReader(f), start=2):
@@ -173,6 +183,7 @@ def load_cases(path: Path | str = CASES_PATH) -> list[Case]:
                 must_contain=_split(row["must_contain"]),
                 must_not_contain=_split(row["must_not_contain"]),
                 expected_answer=row["expected_answer"].strip(),
+                prior_questions=_split(row.get("prior_questions") or ""),
             )
             if not case.question:
                 raise ValueError(f"{path}:{line}: empty question")
@@ -219,12 +230,17 @@ def check_retrieval(
     rewriter: QueryRewriter | None = None,
 ) -> Result:
     """The top k as /chat would pick them: keyword order, or reranked from `candidates`; for the
-    question alone, or with the rewriter's queries too."""
+    question alone, or with the rewriter's queries too. A follow-up's earlier questions go to the
+    rewriter as history without answers (retrieval mode writes none), so with no rewriter a
+    follow-up is searched as asked."""
     rewrite = None
     queries = []
+    question = case.question
+    history = [Turn(q, "") for q in case.prior_questions]
     if rewriter is not None:
-        rewritten = rewrite_or_original(rewriter, case.question)
+        rewritten = rewrite_or_original(rewriter, case.question, history=history)
         queries = rewritten.queries
+        question = rewritten.standalone
         rewrite = {
             "outcome": rewritten.outcome,
             "queries": queries,
@@ -233,12 +249,12 @@ def check_retrieval(
             "output_tokens": rewritten.usage.output_tokens,
         }
     if reranker is None:
-        found = search_with_rewrites(retriever, case.question, queries, k)
+        found = search_with_rewrites(retriever, question, queries, k)
         urls = [r.chunk.source_url for r in found]
         rerank = None
     else:
-        found = search_with_rewrites(retriever, case.question, queries, max(k, candidates))
-        reranked = rerank_or_keyword(reranker, case.question, found, k)
+        found = search_with_rewrites(retriever, question, queries, max(k, candidates))
+        reranked = rerank_or_keyword(reranker, question, found, k)
         urls = [r.chunk.source_url for r in reranked.results]
         rerank = {
             "outcome": reranked.outcome,
@@ -249,6 +265,9 @@ def check_retrieval(
     result = Result(
         case.question, case.category, None, case.expected_urls, urls, rerank=rerank, rewrite=rewrite
     )
+    if history:
+        result.history = [asdict(t) for t in history]
+        result.standalone = question
     if not case.expected_urls:
         return result
     expected = {_norm_url(u) for u in case.expected_urls}
@@ -314,6 +333,11 @@ def check_answer(case: Case, status: int, body: dict, verdict: Verdict | None = 
     elif case.expected_behavior == "refer_to_office":
         if not _has_any(text, POINTS_TO_OFFICE):
             behavior("does not point to an office")
+    elif case.expected_behavior == "ask_clarifying":
+        if "?" not in answer:
+            behavior("does not ask what the student means")
+        if sources:
+            hard("cites pages instead of asking what the student means")
     elif case.expected_behavior == "offer_support":
         if not _has_any(text, CARES):
             behavior("does not respond with care")
@@ -359,14 +383,17 @@ def run_retrieval(
 
 
 class ChunkIdLog(NullExchangeLog):
-    """Keeps only the chunk IDs /chat records for each request: the chunks it gave Claude, after
-    reranking, in order. Nothing is stored past the run."""
+    """Keeps only the chunk IDs /chat records for each request (the chunks it gave Claude, after
+    reranking, in order) and the question it logged (a follow-up's standalone question). Nothing
+    is stored past the run."""
 
     def __init__(self):
         self.chunk_ids: dict[str, list[str]] = {}
+        self.questions: dict[str, str] = {}
 
     def add(self, exchange: Exchange) -> None:
         self.chunk_ids[exchange.request_id] = exchange.chunk_ids
+        self.questions[exchange.request_id] = exchange.question
 
 
 def run_full(
@@ -379,8 +406,10 @@ def run_full(
     rewriter: QueryRewriter | None | str = "app",
 ) -> list[Result]:
     """Post each question to /chat in-process (the same code path as the server), with the
-    given client, and grade the response (with the judge's verdict when one is given). Overrides
-    already set on the app are restored after."""
+    given client, and grade the response (with the judge's verdict when one is given). A
+    follow-up's earlier questions are asked first, and their answers sent as history the way the
+    widget sends them; only the follow-up is graded. Overrides already set on the app are
+    restored after."""
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_chat_client] = lambda: client
     # Eval questions aren't students', so they stay out of the exchange log and its review. The
@@ -404,7 +433,12 @@ def run_full(
         with TestClient(app) as http:
             results = []
             for case in cases:
-                response = http.post("/chat", json={"question": case.question})
+                history = []
+                for prior in case.prior_questions:
+                    earlier = http.post("/chat", json={"question": prior, "history": history})
+                    if earlier.status_code == 200:  # the widget only keeps answered turns
+                        history.append({"question": prior, "answer": earlier.json()["answer"]})
+                response = http.post("/chat", json={"question": case.question, "history": history})
                 body = response.json()
                 chunk_ids = chunk_log.chunk_ids.get(body.get("request_id"))
                 verdict = None
@@ -415,14 +449,23 @@ def run_full(
                         case.expected_answer,
                         body["answer"],
                         judge.sources(case.question, chunk_ids),
+                        _turns(history),
                     )
                 result = check_answer(case, response.status_code, body, verdict)
                 result.chunk_ids = chunk_ids
+                if case.prior_questions:
+                    result.history = history
+                    result.standalone = chunk_log.questions.get(body.get("request_id"))
                 results.append(result)
             return results
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(saved)
+
+
+def _turns(history: list[dict] | None) -> list[Turn]:
+    """Saved or sent history ({"question", "answer"} dicts) as the prompt's turns."""
+    return [Turn(t["question"], t["answer"]) for t in history or []]
 
 
 def _resolve(dependency: Callable, default: Callable):
@@ -506,9 +549,10 @@ def print_full(results: list[Result]) -> None:
 
 
 def _saved(result: Result) -> dict:
-    """The result as saved; the judge, rerank, rewrite, and chunk_ids keys only appear when set."""
+    """The result as saved; the judge, rerank, rewrite, chunk_ids, history, and standalone keys
+    only appear when set."""
     data = asdict(result)
-    for key in ("judge", "rerank", "rewrite", "chunk_ids"):
+    for key in ("judge", "rerank", "rewrite", "chunk_ids", "history", "standalone"):
         if data[key] is None:
             del data[key]
     return data
@@ -633,7 +677,12 @@ def compare(saved: dict, cases: list[Case], judge: Judge) -> tuple[list[Comparis
             # The chunks the bot was given, as the run saved them; runs before #67 have none.
             sources = judge.sources(case.question, r.get("chunk_ids"))
             verdict = judge.grade(
-                case.question, case.expected_behavior, case.expected_answer, r["answer"], sources
+                case.question,
+                case.expected_behavior,
+                case.expected_answer,
+                r["answer"],
+                sources,
+                _turns(r.get("history")),
             )
         comparisons.append(
             Comparison(
