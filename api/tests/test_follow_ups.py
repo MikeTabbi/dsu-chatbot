@@ -40,9 +40,9 @@ FOLLOW_UP = "Can you give me the link to that page?"
 STANDALONE = "Can you give me the link to the meal plan page?"
 
 
-def rewriter_reply(standalone, queries=("meal plan",)):
+def rewriter_reply(standalone, queries=("meal plan",), follow_up=True):
     """What the rewriter model sends back: the JSON the structured output guarantees."""
-    return json.dumps({"standalone": standalone, "queries": list(queries)})
+    return json.dumps({"follow_up": follow_up, "standalone": standalone, "queries": list(queries)})
 
 
 # Fitting the history -----------------------------------------------------------------------------
@@ -82,6 +82,12 @@ def test_a_first_question_gets_exactly_the_prompt_it_got_before():
     assert content.startswith("<sources>") and "<history>" not in content
 
 
+def test_the_rules_name_the_assistant_jada():
+    system = build_prompt(FOLLOW_UP, []).system
+    assert system.startswith("You are Jada, the Delaware State University (DSU) assistant.")
+    assert "never say you aren't Jada" in system
+
+
 def test_the_rules_say_history_is_not_a_source_and_to_ask_when_unclear():
     system = build_prompt(FOLLOW_UP, []).system
     assert "History is not a source" in system
@@ -118,10 +124,18 @@ def test_a_standalone_question_stays_unchanged():
 @pytest.mark.parametrize(
     "reply",
     [
-        '{"queries": ["meal plan"]}',  # no standalone question
-        '{"standalone": "   ", "queries": []}',
-        '{"standalone": 7, "queries": []}',
-        json.dumps({"standalone": "x" * (len(FOLLOW_UP) + MAX_STANDALONE_EXTRA_CHARS + 1)}),
+        '{"follow_up": true, "queries": ["meal plan"]}',  # no standalone question
+        '{"follow_up": true, "standalone": "   ", "queries": []}',
+        '{"follow_up": true, "standalone": 7, "queries": []}',
+        json.dumps(
+            {
+                "follow_up": True,
+                "standalone": "x" * (len(FOLLOW_UP) + MAX_STANDALONE_EXTRA_CHARS + 1),
+            }
+        ),
+        rewriter_reply(STANDALONE, follow_up=False),  # not a follow-up: kept as typed
+        json.dumps({"standalone": STANDALONE, "queries": []}),  # no follow_up: the same
+        json.dumps({"follow_up": "yes", "standalone": STANDALONE}),
         "not json",
     ],
 )
@@ -130,7 +144,7 @@ def test_an_unusable_standalone_question_falls_back_to_the_question(reply):
 
 
 def test_parse_standalone_tidies_spaces():
-    assert parse_standalone('{"standalone": "  meal \\n plan page? "}', FOLLOW_UP) == (
+    assert parse_standalone(rewriter_reply("  meal \n plan page? "), FOLLOW_UP) == (
         "meal plan page?"
     )
 
@@ -203,6 +217,22 @@ def test_a_standalone_question_with_history_is_searched_and_logged_unchanged(cha
     chat["rewriter_client"].answer = rewriter_reply(question, [])
     assert post(question).status_code == 200
     assert chat["log"].exchanges[0].question == question
+
+
+def test_a_question_that_isnt_a_follow_up_is_searched_and_logged_as_typed(chat, caplog):
+    # After only a greeting, "that page" refers to nothing: the model's made-up standalone
+    # question is ignored, so the search, the rerank, and the exchange log use what was typed.
+    greeting = Turn("Hi!", "Hi! What would you like to know about DSU?")
+    chat["rewriter_client"].answer = rewriter_reply(
+        "What are the general information pages about DSU?", [], follow_up=False
+    )
+    with caplog.at_level(logging.INFO, logger="api.app.main"):
+        assert post(history=[greeting]).status_code == 200
+    [exchange] = chat["log"].exchanges
+    assert exchange.question == FOLLOW_UP
+    assert "standalone=same" in caplog.text
+    # Searched as typed, "that page" matches no page, which the made-up question might have.
+    assert exchange.outcome == "no_sources" and chat["answerer"].calls == []
 
 
 def test_no_history_is_the_same_as_before(chat):

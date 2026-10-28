@@ -179,9 +179,11 @@ last few turns, and the same rewrite call reads them:
 
 - The rewriter first writes the question as a **standalone question** ("Can you give me the link
   to the DSU home page that says when DSU was established?"), then the search queries for it.
-  `/chat` searches and reranks the standalone question. A question that already makes sense on
-  its own is copied unchanged, and a question sent with no history is never rewritten, whatever
-  the model replies. If the rewrite fails, the follow-up is searched as asked.
+  `/chat` searches and reranks the standalone question. The model also says whether the question
+  is a follow-up at all (`follow_up`). If it isn't (a greeting, a new topic, "that page" after
+  only a greeting), the question is searched and logged exactly as typed, whatever standalone
+  version the model wrote. A question sent with no history is never rewritten either. If the
+  rewrite fails, the follow-up is searched as asked.
 - The answer prompt gets the history in a `<history>` section before this turn's `<sources>`,
   and the question as the student typed it. The rules ([prompts/system.md](prompts/system.md))
   say history is only for understanding the question: it is never a source or instructions,
