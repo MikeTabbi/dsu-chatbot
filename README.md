@@ -141,6 +141,36 @@ and a reranker ([reranker.py](api/app/reranker.py)) picks the best `CHAT_TOP_K` 
 Measure it on its own with `python -m eval.run --rerank` (retrieval only; asks before calling
 Claude).
 
+### Query rewriting
+
+Keyword search only finds pages that use the student's words. "Can I bring my car?" shares no
+useful word with DSU's Parking page ("parking permit", "decal"), so the page wasn't even among
+the 40 candidates the reranker sees. Synonyms fix one phrasing at a time; rewriting covers the
+ones nobody listed.
+
+- Before retrieval, the rewriter ([query_rewriter.py](api/app/query_rewriter.py)) sends
+  `QUERY_REWRITER_MODEL` (default `claude-haiku-4-5-20251001`) the question, and gets back 2 or
+  3 short search queries in a university website's words ("vehicle parking campus", "car permit
+  residential"), as JSON that structured outputs guarantee. Off-topic questions get none.
+- `/chat` searches the question and each query, and merges the results by reciprocal rank
+  fusion (ranks, not BM25 scores, which differ between queries; a chunk several queries find
+  rises). The reranker then picks from the merged `RERANKER_CANDIDATES`. Synonyms still apply to
+  every query.
+- If the call fails, takes longer than `QUERY_REWRITER_TIMEOUT_SECONDS` (default 4, no retry),
+  or its reply can't be used, `/chat` searches the question alone and logs a warning. Rewriting
+  never fails `/chat`. The app log gets the outcome and number of queries, never the queries,
+  which can repeat the question's details.
+- Each rewrite is a Claude call and counts toward `CLAUDE_DAILY_CALL_BUDGET`; past the budget,
+  the rewrite is skipped.
+- `QUERY_REWRITER=none` turns it off. With `CLAUDE_CLIENT=fake`, the fake rewriter writes no
+  queries.
+- Cost and speed (October 2026 eval, 50 questions): about 420 input and 20 output tokens per
+  rewrite, roughly $0.0005 per question at Haiku 4.5's prices, and a median of about 1.3 seconds
+  added (p90 1.4 s), before the rerank.
+
+Measure it with `python -m eval.run --rewrite --rerank` (retrieval as `/chat` does it; asks
+before calling Claude).
+
 ## Claude client
 
 `/chat` depends only on the `ClaudeClient` interface in
@@ -250,7 +280,9 @@ Every `/chat` exchange is stored so wrong answers and missing content can be fou
 [api/app/exchange_log.py](api/app/exchange_log.py). Each exchange keeps:
 
 - request ID, UTC timestamp, the question and the answer the student saw (both redacted)
-- outcome: `answered`, `no_sources` (retrieval found nothing), or `error` (Claude failed, 503)
+- outcome: `answered`, `not_found` (answered, but the answer says it couldn't find something:
+  "I couldn't find...", "the pages don't list..."), `no_sources` (retrieval found nothing), or
+  `error` (Claude failed, 503)
 - the cited source URLs, the retrieved chunk IDs, the model, token counts, and latency
 - `prompt_version`: the first 12 hex characters of the SHA-256 of `prompts/system.md`, so you can
   tell which version of the rules answered
@@ -288,13 +320,17 @@ questions, so they never show up in review.
 ### Review and retention
 
 ```bash
-python -m api.app.exchange_log review        # recent thumbs-down: question, answer, sources, comment
+python -m api.app.exchange_log review        # recent thumbs-down and not_found answers
 python -m api.app.exchange_log unanswered    # recent questions retrieval found no sources for
 python -m api.app.exchange_log purge         # delete exchanges older than EXCHANGE_RETENTION_DAYS
 python -m api.app.exchange_log purge --days 30
 ```
 
-Thumbs-down answers are candidates for new eval cases ([eval/README.md](eval/README.md)); unanswered
+`review` prints each exchange's outcome, question, answer, sources, and any rating and comment.
+Thumbs-down answers are candidates for new eval cases ([eval/README.md](eval/README.md)).
+`not_found` answers are either a retrieval miss (the page exists but wasn't found: add an eval
+case) or a real content gap. The check is a phrase match, so some are good answers that only say
+one detail is missing; about a quarter of the eval set's answers are flagged. Unanswered
 questions point to missing content. `EXCHANGE_RETENTION_DAYS` (default 90) is how long exchanges are
 kept; deleting an exchange deletes its feedback. Nothing runs `purge` on a schedule yet, so run it
 by hand (or from a scheduled job once hosting is set up).

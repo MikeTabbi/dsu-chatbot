@@ -15,15 +15,23 @@ from fastapi.testclient import TestClient
 
 from api.app.claude_client import ClaudeClient, FakeClaudeClient, get_claude_client
 from api.app.config import settings
-from api.app.exchange_log import Exchange, NullExchangeLog
+from api.app.exchange_log import NOT_FOUND, Exchange, NullExchangeLog
 from api.app.main import (
     app,
     get_chat_client,
     get_chat_exchange_log,
+    get_chat_query_rewriter,
     get_chat_rate_limiter,
     get_chat_reranker,
     get_chat_retriever,
     get_settings,
+)
+from api.app.query_rewriter import (
+    ClaudeQueryRewriter,
+    QueryRewriter,
+    get_query_rewriter,
+    rewrite_or_original,
+    search_with_rewrites,
 )
 from api.app.rate_limit import NoRateLimiter
 from api.app.reranker import ClaudeReranker, Reranker, get_reranker, rerank_or_keyword
@@ -53,40 +61,9 @@ BEHAVIORS_FOR_CATEGORY = {
     ),
 }
 
-# Lowercase markers for the behavior checks. Answers are compared lowercased, with curly quotes
-# straightened. These are heuristics: read the saved answers before trusting a pass or fail.
-NOT_FOUND = (
-    "couldn't find",
-    "could not find",
-    "didn't find",
-    "wasn't able to find",
-    "not able to find",
-    "don't have information",
-    "don't have details",
-    "don't have specific",
-    "don't have any",
-    "doesn't say",
-    "don't say",
-    "don't see",
-    "doesn't explain",
-    "don't explain",
-    "doesn't give",
-    "don't give",
-    "doesn't list",
-    "don't list",
-    "doesn't mention",
-    "don't mention",
-    "doesn't include",
-    "don't include",
-    "doesn't cover",
-    "don't cover",
-    "isn't listed",
-    "not listed",
-    "not covered",
-    "isn't covered",
-    "no information",
-    "no details",
-)
+# Lowercase markers for the behavior checks; NOT_FOUND comes from the exchange log, whose review
+# flags the same answers. Answers are compared lowercased, with curly quotes straightened. These
+# are heuristics: read the saved answers before trusting a pass or fail.
 POINTS_TO_OFFICE = ("office", "contact", "advisor", "registrar", "admissions", "reach out")
 CANT_SEE_RECORDS = (
     "can't see",
@@ -163,6 +140,7 @@ class Result:
     failures: list[str] = field(default_factory=list)
     judge: dict | None = None  # with --judge: the judge's verdict ({"passed", "reason"})
     rerank: dict | None = None  # retrieval with --rerank: outcome, latency_ms, tokens
+    rewrite: dict | None = None  # retrieval with --rewrite: outcome, queries, latency_ms, tokens
     # full: the chunks /chat gave Claude after reranking, in order (None: no exchange recorded)
     chunk_ids: list[str] | None = None
 
@@ -233,14 +211,33 @@ def _has_any(text: str, markers: tuple[str, ...]) -> bool:
 
 
 def check_retrieval(
-    case: Case, retriever: Retriever, k: int, reranker: Reranker | None = None, candidates: int = 0
+    case: Case,
+    retriever: Retriever,
+    k: int,
+    reranker: Reranker | None = None,
+    candidates: int = 0,
+    rewriter: QueryRewriter | None = None,
 ) -> Result:
-    """The top k as /chat would pick them: keyword order, or reranked from `candidates`."""
+    """The top k as /chat would pick them: keyword order, or reranked from `candidates`; for the
+    question alone, or with the rewriter's queries too."""
+    rewrite = None
+    queries = []
+    if rewriter is not None:
+        rewritten = rewrite_or_original(rewriter, case.question)
+        queries = rewritten.queries
+        rewrite = {
+            "outcome": rewritten.outcome,
+            "queries": queries,
+            "latency_ms": round(rewritten.latency_ms),
+            "input_tokens": rewritten.usage.input_tokens,
+            "output_tokens": rewritten.usage.output_tokens,
+        }
     if reranker is None:
-        urls = [r.chunk.source_url for r in retriever.search(case.question, k)]
+        found = search_with_rewrites(retriever, case.question, queries, k)
+        urls = [r.chunk.source_url for r in found]
         rerank = None
     else:
-        found = retriever.search(case.question, max(k, candidates))
+        found = search_with_rewrites(retriever, case.question, queries, max(k, candidates))
         reranked = rerank_or_keyword(reranker, case.question, found, k)
         urls = [r.chunk.source_url for r in reranked.results]
         rerank = {
@@ -249,7 +246,9 @@ def check_retrieval(
             "input_tokens": reranked.usage.input_tokens,
             "output_tokens": reranked.usage.output_tokens,
         }
-    result = Result(case.question, case.category, None, case.expected_urls, urls, rerank=rerank)
+    result = Result(
+        case.question, case.category, None, case.expected_urls, urls, rerank=rerank, rewrite=rewrite
+    )
     if not case.expected_urls:
         return result
     expected = {_norm_url(u) for u in case.expected_urls}
@@ -354,8 +353,9 @@ def run_retrieval(
     k: int,
     reranker: Reranker | None = None,
     candidates: int = 0,
+    rewriter: QueryRewriter | None = None,
 ) -> list[Result]:
-    return [check_retrieval(c, retriever, k, reranker, candidates) for c in cases]
+    return [check_retrieval(c, retriever, k, reranker, candidates, rewriter) for c in cases]
 
 
 class ChunkIdLog(NullExchangeLog):
@@ -376,6 +376,7 @@ def run_full(
     k: int | None = None,
     judge: Judge | None = None,
     reranker: Reranker | None | str = "app",
+    rewriter: QueryRewriter | None | str = "app",
 ) -> list[Result]:
     """Post each question to /chat in-process (the same code path as the server), with the
     given client, and grade the response (with the judge's verdict when one is given). Overrides
@@ -393,6 +394,8 @@ def run_full(
         app.dependency_overrides[get_chat_retriever] = lambda: retriever
     if reranker != "app":  # "app": whatever /chat would use
         app.dependency_overrides[get_chat_reranker] = lambda: reranker
+    if rewriter != "app":
+        app.dependency_overrides[get_chat_query_rewriter] = lambda: rewriter
     if k is not None:
         app.dependency_overrides[get_settings] = lambda: settings.model_copy(
             update={"chat_top_k": k}
@@ -457,20 +460,26 @@ def print_retrieval(results: list[Result], k: int) -> None:
     passed, graded = score(results)
     print(f"\nRetrieval: {passed}/{graded} cases have an expected URL in the top {k}", end="")
     print(f" ({len(results) - graded} cases have no expected URL)")
-    reranks = [r.rerank for r in results if r.rerank]
-    if reranks:
-        called = [r for r in reranks if r["outcome"].startswith("reranked")]
-        fallbacks = [r["outcome"] for r in reranks if r["outcome"].startswith("fallback")]
-        print(f"Reranked {len(called)}/{len(reranks)}", end="")
-        print(f"; fell back to keyword order {len(fallbacks)}: {fallbacks}" if fallbacks else "")
-        if called:
-            latency = sorted(r["latency_ms"] for r in called)
-            n = len(called)
-            print(
-                f"Rerank latency ms: median {latency[n // 2]}, max {latency[-1]}; tokens per "
-                f"rerank: {sum(r['input_tokens'] for r in called) / n:.0f} in, "
-                f"{sum(r['output_tokens'] for r in called) / n:.0f} out"
-            )
+    _print_cost("Reranked", [r.rerank for r in results if r.rerank], "reranked")
+    _print_cost("Rewrite", [r.rewrite for r in results if r.rewrite], "rewritten")
+
+
+def _print_cost(name: str, calls: list[dict], ok: str) -> None:
+    """How many calls worked, which fell back, and the latency and tokens of the ones that did."""
+    if not calls:
+        return
+    worked = [c for c in calls if c["outcome"].startswith(ok)]
+    fallbacks = [c["outcome"] for c in calls if c["outcome"].startswith("fallback")]
+    print(f"{name} {len(worked)}/{len(calls)}", end="")
+    print(f"; fell back {len(fallbacks)}: {fallbacks}" if fallbacks else "")
+    if worked:
+        latency = sorted(c["latency_ms"] for c in worked)
+        n = len(worked)
+        print(
+            f"{name} latency ms: median {latency[n // 2]}, p90 {latency[int(n * 0.9)]}, "
+            f"max {latency[-1]}; tokens: {sum(c['input_tokens'] for c in worked) / n:.0f} in, "
+            f"{sum(c['output_tokens'] for c in worked) / n:.0f} out"
+        )
 
 
 def print_full(results: list[Result]) -> None:
@@ -497,9 +506,9 @@ def print_full(results: list[Result]) -> None:
 
 
 def _saved(result: Result) -> dict:
-    """The result as saved; the judge, rerank, and chunk_ids keys only appear when set."""
+    """The result as saved; the judge, rerank, rewrite, and chunk_ids keys only appear when set."""
     data = asdict(result)
-    for key in ("judge", "rerank", "chunk_ids"):
+    for key in ("judge", "rerank", "rewrite", "chunk_ids"):
         if data[key] is None:
             del data[key]
     return data
@@ -695,6 +704,11 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
         help="retrieval only: rerank the candidates as /chat does (calls RERANKER_MODEL)",
     )
     parser.add_argument(
+        "--rewrite",
+        action="store_true",
+        help="retrieval only: rewrite each question as /chat does (calls QUERY_REWRITER_MODEL)",
+    )
+    parser.add_argument(
         "--judge",
         action="store_true",
         help="with --full: Claude grades behavior instead of the phrase checks (JUDGE_MODEL)",
@@ -724,6 +738,8 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
     args = parser.parse_args(argv)
     if args.rerank and (args.full or args.compare or args.calibrate):
         parser.error("--rerank is for retrieval only; --full reranks as /chat does (RERANKER)")
+    if args.rewrite and (args.full or args.compare or args.calibrate):
+        parser.error("--rewrite is for retrieval only; --full rewrites as /chat does")
     if args.judge and not args.full:
         parser.error("--judge needs --full (--compare and --calibrate always use the judge)")
     if sum(map(bool, (args.full, args.compare, args.calibrate))) > 1:
@@ -737,20 +753,28 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
     config = settings.model_copy(update={"claude_client": args.client})
 
     if not (args.full or args.compare or args.calibrate):
-        reranker, meta = None, {"k": args.k}
+        reranker, rewriter, meta, models = None, None, {"k": args.k}, []
+        if args.rewrite:
+            rewriter = _resolve(get_chat_query_rewriter, lambda: get_query_rewriter(config))
+            meta.update(rewriter=config.query_rewriter_model)
+            if isinstance(rewriter, ClaudeQueryRewriter):
+                models.append(config.query_rewriter_model)
         if args.rerank:
             reranker = _resolve(get_chat_reranker, lambda: get_reranker(config))
-            real = isinstance(reranker, ClaudeReranker)
             meta.update(candidates=config.reranker_candidates, reranker=config.reranker_model)
-            message = (
-                f"Reranking sends {len(cases)} question(s) to Claude ({config.reranker_model})."
-            )
-            if real and not args.yes and not confirm(message, ask):
+            if isinstance(reranker, ClaudeReranker):
+                models.append(config.reranker_model)
+        if models:
+            message = f"Sends {len(cases)} question(s) to Claude ({', '.join(models)})."
+            if not args.yes and not confirm(message, ask):
                 print("Cancelled; no Claude calls made.")
                 return 1
-        results = run_retrieval(cases, retriever, args.k, reranker, config.reranker_candidates)
+        results = run_retrieval(
+            cases, retriever, args.k, reranker, config.reranker_candidates, rewriter
+        )
         print_retrieval(results, args.k)
-        path = save(results, "retrieval-rerank" if args.rerank else "retrieval", meta, args.out)
+        mode = "-".join(["retrieval"] + ["rewrite"] * args.rewrite + ["rerank"] * args.rerank)
+        path = save(results, mode, meta, args.out)
         print(f"Saved {path}")
         return 0
 
@@ -791,13 +815,14 @@ def main(argv: list[str] | None = None, ask: Callable[[str], str] = input) -> in
     if (real or (judge and judge_model != "fake")) and not args.yes and not confirm(message, ask):
         print("Cancelled; no Claude calls made.")
         return 1
-    # The reranker follows the client: a fake or substituted client (tests) gets the fake
-    # reranker, so the run makes no Claude calls of its own.
+    # The reranker and rewriter follow the client: a fake or substituted client (tests) gets
+    # the fake ones, so the run makes no Claude calls of its own.
     substituted = get_chat_client in app.dependency_overrides
     use_fake = not real or substituted
     rerank_config = config.model_copy(update={"claude_client": "fake"}) if use_fake else config
     reranker = _resolve(get_chat_reranker, lambda: get_reranker(rerank_config))
-    results = run_full(cases, client, retriever, args.k, judge, reranker)
+    rewriter = _resolve(get_chat_query_rewriter, lambda: get_query_rewriter(rerank_config))
+    results = run_full(cases, client, retriever, args.k, judge, reranker, rewriter)
     print_full(results)
     model = config.claude_model if real else "fake"
     meta = {"k": args.k, "client": args.client, "model": model}

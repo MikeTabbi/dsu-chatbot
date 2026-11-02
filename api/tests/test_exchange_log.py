@@ -11,6 +11,7 @@ from api.app.exchange_log import (
     UnknownRequestError,
     get_exchange_log,
     main,
+    says_not_found,
 )
 
 
@@ -110,21 +111,44 @@ def test_purge_command_uses_the_retention_setting(tmp_path, capsys):
     assert store.recent() == []
 
 
-def test_review_command_lists_thumbs_down_with_comment(tmp_path, capsys):
+def test_review_command_lists_thumbs_down_and_not_found_answers(tmp_path, capsys):
     config = Settings(exchange_log_path=str(tmp_path / "x.sqlite"))
     store = get_exchange_log(config)
     store.add(exchange("liked", question="Liked question"))
     store.add(exchange("disliked", question="Disliked question"))
+    store.add(exchange("missed", outcome="not_found", question="Can I bring my car?"))
+    store.add(exchange("unrated", question="Unrated question"))
+    store.add(exchange("nothing", outcome="no_sources", question="Wifi password?"))
     store.set_feedback("liked", "up", None)
     store.set_feedback("disliked", "down", "Out of date")
     main(["review"], config=config)
     out = capsys.readouterr().out
-    assert "1 thumbs-down exchange(s)" in out
+    assert "2 exchange(s) to review" in out
     assert "Question: Disliked question" in out
     assert "DSU is in Dover." in out
     assert "Sources:  https://www.desu.edu/about" in out
     assert "Comment:  Out of date" in out
-    assert "Liked question" not in out
+    assert "outcome=not_found" in out and "Question: Can I bring my car?" in out
+    for left_out in ("Liked question", "Unrated question", "Wifi password?"):
+        assert left_out not in out  # no_sources has its own command, unanswered
+
+
+def test_to_review_includes_a_not_found_answer_even_if_rated_up(store):
+    store.add(exchange("missed", outcome="not_found"))
+    store.set_feedback("missed", "up", None)
+    assert [r.exchange.request_id for r in store.recent(to_review=True)] == ["missed"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "flagged"),
+    [
+        ("I couldn’t find parking rules in the pages I have.", True),  # curly apostrophe
+        ("The pages I have DON'T LIST a school code.", True),
+        ("Students need a parking permit for their lot.", False),
+    ],
+)
+def test_says_not_found(answer, flagged):
+    assert says_not_found(answer) is flagged
 
 
 def test_unanswered_command_lists_no_sources_questions(tmp_path, capsys):

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     reranker_model: str = "claude-haiku-4-5-20251001"
     reranker_candidates: int = 40
     reranker_timeout_seconds: float = 5.0  # no retry: past this, /chat keeps keyword order
+    # Query rewriting (api/app/query_rewriter.py): a cheap model rewrites the question into search
+    # queries in DSU's words before retrieval. Each rewrite counts toward the daily Claude budget.
+    query_rewriter: str = "claude"  # claude (fake rewriter when CLAUDE_CLIENT=fake) | none
+    query_rewriter_model: str = "claude-haiku-4-5-20251001"
+    query_rewriter_timeout_seconds: float = 4.0  # no retry: past this, search the question only
     chat_max_question_chars: int = 1000
     # Sites allowed to call the API from a browser (the widget), comma-separated. The default is
     # the local demo page (widget/README.md); production lists DSU's site. "*" is refused.

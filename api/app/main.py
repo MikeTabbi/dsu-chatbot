@@ -23,8 +23,15 @@ from api.app.exchange_log import (
     UnknownRequestError,
     get_exchange_log,
     now,
+    says_not_found,
 )
 from api.app.prompt import build_prompt, linked_sources, parse_citations, prompt_version
+from api.app.query_rewriter import (
+    QueryRewriter,
+    get_query_rewriter,
+    rewrite_or_original,
+    search_with_rewrites,
+)
 from api.app.rate_limit import DAY, MINUTE, Limit, RateLimiter, client_ip, get_rate_limiter
 from api.app.redact import redact, redact_echoes
 from api.app.request_guard import RequestGuard
@@ -121,6 +128,12 @@ def get_chat_reranker() -> Reranker | None:
 
 
 @functools.cache
+def get_chat_query_rewriter() -> QueryRewriter | None:
+    """Built once; tests override this dependency. None: search the question only."""
+    return get_query_rewriter(settings)
+
+
+@functools.cache
 def get_chat_client() -> ClaudeClient:
     """Built once; tests override this dependency."""
     return get_claude_client(settings)
@@ -214,6 +227,7 @@ def chat(
     request: ChatRequest,
     retriever: Annotated[Retriever, Depends(get_chat_retriever)],
     reranker: Annotated[Reranker | None, Depends(get_chat_reranker)],
+    rewriter: Annotated[QueryRewriter | None, Depends(get_chat_query_rewriter)],
     client: Annotated[ClaudeClient, Depends(get_chat_client)],
     config: Annotated[Settings, Depends(get_settings)],
     exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
@@ -230,8 +244,26 @@ def chat(
             422, f"Please keep your question under {config.chat_max_question_chars} characters."
         )
 
+    # The daily budget counts Claude calls from every client, so credits are safe even when the
+    # traffic comes from many addresses. A rewrite is a Claude call, so it counts; past the
+    # budget, search uses the question alone (and the answer below says the bot is busy).
+    budget = Limit("claude_daily_calls", config.claude_daily_call_budget, DAY)
+    rewrites = rewriter is not None and rewriter.calls_claude
+    allowed = not rewrites or limiter.hit("global:claude", [budget]) is None
+    rewritten = rewrite_or_original(rewriter, question, allowed)
+    if rewritten.outcome != "off":
+        # How many queries, never what they say: they can repeat the question's personal details.
+        log.info(
+            "rewrite request_id=%s outcome=%s queries=%d latency_ms=%.0f",
+            request_id,
+            rewritten.outcome,
+            len(rewritten.queries),
+            rewritten.latency_ms,
+        )
+
     k = config.chat_top_k
-    candidates = retriever.search(question, max(k, config.reranker_candidates) if reranker else k)
+    n = max(k, config.reranker_candidates) if reranker else k
+    candidates = search_with_rewrites(retriever, question, rewritten.queries, n)
     chunks = [r.chunk for r in candidates[:k]]
 
     def record(outcome: Outcome, answer: str, sources=(), reply: ClaudeReply | None = None):
@@ -242,9 +274,7 @@ def chat(
         record("no_sources", NO_CONTENT_ANSWER)
         return ChatResponse(answer=NO_CONTENT_ANSWER, sources=[], request_id=request_id)
 
-    # The daily budget counts Claude calls from every client, so credits are safe even when the
-    # traffic comes from many addresses. Questions with no chunks never call Claude or count.
-    budget = Limit("claude_daily_calls", config.claude_daily_call_budget, DAY)
+    # Questions with no chunks never call Claude for an answer, so only their rewrite counted.
     if blocked := limiter.hit("global:claude", [budget]):
         _log_request(request_id, start, chunks, "busy reason=daily_budget")
         return JSONResponse(
@@ -287,8 +317,11 @@ def chat(
         )
     cited = sorted(set(answer.cited) | set(linked.cited))
     sources = _sources([chunks[n - 1] for n in cited])
-    _log_request(request_id, start, chunks, f"answered cited={len(cited)}")
-    record("answered", answer.text, sources, reply)
+    # An answer that says it couldn't find something is logged as not_found, so the exchange
+    # log's review lists it with the thumbs-down answers: a retrieval miss or a content gap.
+    outcome = "not_found" if says_not_found(answer.text) else "answered"
+    _log_request(request_id, start, chunks, f"{outcome} cited={len(cited)}")
+    record(outcome, answer.text, sources, reply)
     return ChatResponse(answer=answer.text, sources=sources, request_id=request_id)
 
 

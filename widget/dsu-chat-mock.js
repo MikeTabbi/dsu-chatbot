@@ -21,6 +21,13 @@
   // the reply. `reply: null` means a network error. A question with none of the words gets "short".
   const STATES = [
     {
+      name: "new message",
+      words: ["new message"],
+      delayMs: 2500, // time to scroll up, so the answer shows the "New message" button
+      status: 200,
+      reply: "long",
+    },
+    {
       name: "slow",
       words: ["slow", "loading"],
       delayMs: 5000,
@@ -138,7 +145,7 @@
     },
   ];
 
-  const DEFAULT_DELAY_MS = 800; // long enough to see the loading dots
+  const DEFAULT_DELAY_MS = 800; // long enough to see the typing indicator
 
   function pickState(question) {
     const q = String(question).toLowerCase();

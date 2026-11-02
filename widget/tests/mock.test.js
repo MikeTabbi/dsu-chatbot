@@ -60,6 +60,7 @@ test("mock mode never makes a network request", async () => {
     "What's my GPA? (personal)",
     "Write me a poem (off topic)",
     "Where is DSU? (slow)",
+    "Which meal plans are there? (new message)",
     "Where is DSU? (503)",
     "Where is DSU? (rate limit)",
     "Where is DSU? (network)",
@@ -93,6 +94,11 @@ test("each state gives the reply the widget expects", async () => {
 
   const slow = await ask(window, "Where is DSU? (slow)");
   assert.equal(slow.status, 200);
+
+  // "New message": the long answer (Show more, Sources chip), slow enough to scroll up.
+  const newMessage = await ask(window, "Which meal plans are there? (new message)");
+  assert.equal(newMessage.status, 200);
+  assert.deepEqual(await newMessage.json(), long);
 
   const unavailable = await ask(window, "(503)");
   assert.equal(unavailable.status, 503);
@@ -134,7 +140,7 @@ test("thumbs up/down in mock mode succeed with no network request", async () => 
 
 test("every mock answer has a request ID, so it gets thumbs buttons", async () => {
   const { window } = loadMock("?mock=1");
-  for (const question of ["short", "long answer", "personal", "off topic", "slow"]) {
+  for (const question of ["short", "long answer", "personal", "off topic", "slow", "new message"]) {
     const body = await (await ask(window, question)).json();
     assert.equal(typeof body.request_id, "string", question);
   }
