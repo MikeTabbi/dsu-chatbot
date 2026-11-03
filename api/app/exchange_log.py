@@ -73,7 +73,8 @@ def says_not_found(answer: str) -> bool:
 class Exchange:
     request_id: str
     timestamp: str  # ISO 8601, UTC, e.g. 2026-10-02T15:04:05+00:00
-    question: str  # redacted
+    # redacted; a follow-up's standalone question (#76). The earlier turns are never stored.
+    question: str
     answer: str  # redacted; the text the student saw
     outcome: Outcome
     prompt_version: str  # prompt.prompt_version(): a hash of prompts/system.md
