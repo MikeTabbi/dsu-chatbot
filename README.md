@@ -22,21 +22,111 @@ See [docs/architecture.md](docs/architecture.md) for details.
 | `infra/` | Azure setup as code |
 | `docs/` | Architecture and decision records |
 
-## Run locally
+## Quick start: try the chatbot on your machine
 
-Requires Python 3.11+.
+About 10 minutes. At the end you'll have the chat window open in your browser, answering
+questions from DSU's pages.
+
+### What you need
+
+- **Python 3.11 or newer.** Check with `python3 --version`.
+- **Git**, to download the code.
+- **An Anthropic API key** for real answers (get one at https://console.anthropic.com). No key? You
+  can still run everything; answers will be placeholders (see step 3).
+
+### 1. Download the code
 
 ```bash
-cp .env.example .env          # then fill in your own values
-pip install -e ".[dev]"
-uvicorn api.app.main:app --reload
+git clone https://github.com/MikeTabbi/dsu-chatbot.git
+cd dsu-chatbot
 ```
 
-Check it's running: http://localhost:8000/health
+Run every command below from this `dsu-chatbot` folder.
 
-To see the whole thing working (backend plus the chat widget on the demo page), run
-`./scripts/run-demo.sh` and open http://localhost:8080/demo.html. See
-[widget/README.md](widget/README.md#running-it-locally).
+### 2. Install it
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+```
+
+The first line creates a private Python environment for the project, and the second turns it
+on. **Run `source .venv/bin/activate` again in every new terminal window** before using the
+project. Your prompt starts with `(.venv)` when it's on.
+
+### 3. Add your settings
+
+```bash
+cp .env.example .env               # Windows: copy .env.example .env
+```
+
+Open `.env` in any editor and change these two lines:
+
+```ini
+CLAUDE_CLIENT=anthropic
+ANTHROPIC_API_KEY=sk-ant-...your key...
+```
+
+Leave everything else as it is. Without a key, keep `CLAUDE_CLIENT=fake`: the bot still finds
+DSU pages, but every answer reads `[fake answer] <your question>`.
+
+`.env` holds your key, so never commit or share it (git already ignores it).
+
+### 4. Download DSU's pages (the search index)
+
+The bot answers only from DSU pages it has downloaded. The repo doesn't include them, so build
+them once:
+
+```bash
+python -m ingestion.pipeline
+```
+
+This takes a few minutes and saves the pages to `data/index/chunks.json`. Skip it and every
+question gets "I couldn't find anything." Rerun it whenever you want fresh content; a running
+bot picks up the new pages without a restart.
+
+### 5. Start the chatbot
+
+```bash
+./scripts/run-demo.sh
+```
+
+This starts the backend and the demo page, and opens http://localhost:8080/demo.html in your
+browser (open it yourself if it doesn't). Click the chat button and ask something like
+*"Which dorms have carpeted rooms?"* or *"How do I register for classes?"*. Press **Ctrl+C** in
+the terminal to stop.
+
+**Windows** (no bash): start the two parts in two terminals, both with the environment on:
+
+```bash
+python -m uvicorn api.app.main:app --port 8000
+python -m http.server 8080 --bind 127.0.0.1 --directory widget
+```
+
+### Something not working?
+
+| What you see | Fix |
+|---|---|
+| `command not found: run-demo.sh` | Type the `./` in front: `./scripts/run-demo.sh` |
+| `permission denied` | `chmod +x scripts/run-demo.sh`, or run `bash scripts/run-demo.sh` |
+| `No .env file` | Do step 3 |
+| Every answer is "I couldn't find anything" | Do step 4 |
+| Answers start with `[fake answer]` | Set `CLAUDE_CLIENT=anthropic` and your key in `.env`, then restart |
+| `No module named ...` | The environment is off: `source .venv/bin/activate` |
+| The chat window can't reach the server | Check http://localhost:8000/health shows `{"status":"ok"}`; open the page at `localhost:8080`, not as a file |
+| "Address already in use" | An old copy is still running: close that terminal, or stop whatever uses port 8000/8080 |
+
+Is your key working? `python -m api.app.claude_client "Reply with: hello from DSU"` should print
+Claude's reply.
+
+### Just want to see the chat window?
+
+No install, no key, no backend: `python3 -m http.server 8080 --directory widget`, then open
+http://localhost:8080/demo.html?mock=1. It plays back saved answers.
+
+More everyday commands are in [COMMANDS.md](COMMANDS.md); embedding the widget on a site is in
+[widget/README.md](widget/README.md).
 
 ## Retrieval
 
