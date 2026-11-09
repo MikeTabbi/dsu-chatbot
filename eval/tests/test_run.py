@@ -5,7 +5,7 @@ import pytest
 from pydantic import SecretStr
 
 from api.app.claude_client import ClaudeError, FakeClaudeClient
-from api.app.main import app, get_chat_client, get_chat_retriever
+from api.app.main import NO_CONTENT_ANSWER, app, get_chat_client, get_chat_retriever
 from api.app.query_rewriter import FakeQueryRewriter, RewriteError
 from api.app.reranker import FakeReranker, RerankError
 from api.app.retriever import ScoredChunk
@@ -108,9 +108,28 @@ def test_regex_alternation_is_not_split_and_every_repo_regex_compiles():
     assert run._split("re:(a|b) is (c|d)|plain") == ["re:(a|b) is (c|d)", "plain"]
     phrases = [p for c in load_cases() for p in c.must_contain + c.must_not_contain]
     regexes = [p for p in phrases if p.startswith("re:")]
-    assert len(regexes) == 46
+    assert len(regexes) == 49
     for p in regexes:
         re.compile(p[3:])
+
+
+def test_repo_eval_set_has_follow_ups_with_their_earlier_questions():
+    follow_ups = {c.question: c.prior_questions for c in load_cases() if c.prior_questions}
+    assert follow_ups["how much does it cost?"] == ["What's the housing application deadline?"]
+    assert follow_ups["Can you give me the link to that page?"] == [
+        "Where can I get tutoring at DSU?"
+    ]
+    assert {c.category for c in load_cases() if c.prior_questions} == {"answer", "clarify"}
+
+
+def test_prior_questions_are_split_and_optional(tmp_path, cases_csv):
+    assert all(c.prior_questions == [] for c in load_cases(cases_csv))  # an older CSV loads
+    path = tmp_path / "follow-ups.csv"
+    path.write_text(
+        CSV_HEADER.replace("\n", ",prior_questions\n")
+        + '"how much is it?","","","clarify","ask_clarifying","","","Hi!|What dorms are there?"\n'
+    )
+    assert load_cases(path)[0].prior_questions == ["Hi!", "What dorms are there?"]
 
 
 def test_behavior_must_match_category(tmp_path):
@@ -293,6 +312,15 @@ def test_crisis_lines_and_plain_numbers_need_no_source():
     assert check_answer(case("off_topic", urls=[]), 200, ok(plain, sources=())).passed
 
 
+def test_ask_clarifying_needs_a_question_and_no_guessed_pages():
+    clarify = case("clarify", urls=[])
+    assert check_answer(clarify, 200, ok("Which page do you mean?", sources=())).passed
+    vague = check_answer(clarify, 200, ok("Here is the home page.", sources=()))
+    assert vague.failures == ["does not ask what the student means"]
+    guessed = check_answer(clarify, 200, ok("Do you mean this page?", sources=(MATRIX,)))
+    assert guessed.failures == ["cites pages instead of asking what the student means"]
+
+
 def test_error_status_fails():
     result = check_answer(
         case("gap", urls=[]), 503, {"detail": "Sorry, try again.", "request_id": "x"}
@@ -309,6 +337,34 @@ def test_full_mode_goes_through_chat_with_the_given_client(cases_csv, retriever)
     [(_, messages)] = fake.calls
     assert "<question>\nWhich dorms have carpeted rooms?\n</question>" in messages[0]["content"]
     assert MATRIX in messages[0]["content"]
+
+
+def test_full_mode_asks_the_earlier_questions_first_and_sends_their_answers(retriever):
+    fake = FakeClaudeClient(answer="Wynder Tower has carpet.\n<cited>1</cited>")
+    rewriter = FakeQueryRewriter(standalone="Which dorms have carpeted rooms?")
+    follow_up = case(q="what about that one?")
+    follow_up.prior_questions = ["Hi!", "Which dorms have carpeted rooms?"]
+    [result] = run_full([follow_up], fake, retriever, k=2, reranker=None, rewriter=rewriter)
+    assert rewriter.calls == ["Hi!", "Which dorms have carpeted rooms?", "what about that one?"]
+    assert result.history == [
+        {"question": "Hi!", "answer": NO_CONTENT_ANSWER},  # retrieval found nothing for it
+        {"question": "Which dorms have carpeted rooms?", "answer": "Wynder Tower has carpet."},
+    ]
+    assert [len(h) for h in rewriter.histories] == [0, 1, 2]
+    # Graded on the follow-up only; it was searched (and logged) as its standalone question.
+    assert result.question == "what about that one?" and result.passed
+    assert result.standalone == "Which dorms have carpeted rooms?"
+    [*_, (_, messages)] = fake.calls
+    assert "<history>" in messages[0]["content"]
+    assert "<question>\nwhat about that one?\n</question>" in messages[0]["content"]
+
+
+def test_a_case_without_earlier_questions_sends_no_history(cases_csv, retriever):
+    fake = FakeClaudeClient(answer="Wynder Tower has carpet.\n<cited>1</cited>")
+    [result] = run_full(load_cases(cases_csv)[:1], fake, retriever, k=2)
+    assert result.history is None and result.standalone is None
+    assert "history" not in run._saved(result)
+    assert "<history>" not in fake.calls[0][1][0]["content"]
 
 
 def test_full_mode_records_claude_errors(cases_csv, retriever):
@@ -452,6 +508,16 @@ def test_check_retrieval_searches_the_rewrites_too_and_records_them():
     assert result.passed
     assert result.rewrite["outcome"] == "rewritten"
     assert result.rewrite["queries"] == ["comparison matrix"]
+
+
+def test_check_retrieval_searches_a_follow_up_as_its_standalone_question():
+    follow_up = case(q="what about that page?")
+    follow_up.prior_questions = ["Which dorms have carpet?"]
+    rewriter = FakeQueryRewriter(standalone="comparison matrix")
+    result = run.check_retrieval(follow_up, ByQuery(), k=2, rewriter=rewriter)
+    assert result.passed and result.standalone == "comparison matrix"
+    assert rewriter.histories == [[run.Turn("Which dorms have carpet?", "")]]
+    assert result.history == [{"question": "Which dorms have carpet?", "answer": ""}]
 
 
 def test_check_retrieval_searches_the_question_alone_when_the_rewriter_fails():

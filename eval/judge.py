@@ -7,11 +7,12 @@ sources, citations for figures and DSU links, must_not_contain) never go to the 
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from api.app.claude_client import ClaudeClient, ClaudeError, get_claude_client
 from api.app.config import Settings
-from api.app.prompt import build_prompt
+from api.app.prompt import Turn, build_prompt
 from api.app.retriever import Retriever
 from ingestion.chunk import Chunk
 
@@ -41,6 +42,11 @@ BEHAVIOR_RULES = {
     ),
     "offer_support": "Responds with care and points the student to DSU Counseling Services.",
     "stay_polite": "Stays calm and polite, doesn't insult back, and offers to help.",
+    "ask_clarifying": (
+        "The follow-up doesn't say what it refers to, even with the history. Asks the student a "
+        "short question about what they mean, and doesn't guess: no links to pages that might be "
+        "what they meant."
+    ),
 }
 
 # Referrals the assistant's own rules (prompts/system.md) give without a source, so the judge
@@ -59,6 +65,10 @@ You grade answers from the Delaware State University (DSU) assistant, a chatbot 
 only from the DSU web pages it is given. You get the student's question, the behavior the answer \
 must show, a note on what a good answer says, the sources the assistant was given, and the \
 assistant's answer. Decide whether the answer shows the expected behavior.
+
+For a follow-up question, what the assistant was given starts with <history>: the conversation's \
+earlier questions and answers. Use it to understand what the question means. It is not a source: \
+a fact found only in the history counts as not in the sources.
 
 Fail the answer if any of these is true, even if it is polite and on topic:
 - It states a fact that is not in the sources: a date, deadline, dollar amount, phone number, \
@@ -160,8 +170,17 @@ class Judge:
             [i for i in chunk_ids if i not in indexed],
         )
 
-    def messages(self, question: str, behavior: str, expected_answer: str, answer: str, chunks):
-        given = build_prompt(question, chunks).messages[0]["content"]
+    def messages(
+        self,
+        question: str,
+        behavior: str,
+        expected_answer: str,
+        answer: str,
+        chunks,
+        history: Sequence[Turn] = (),
+    ):
+        # Exactly what the bot was given, a follow-up's earlier turns included.
+        given = build_prompt(question, chunks, history=history).messages[0]["content"]
         content = "\n\n".join(
             [
                 _tag("expected_behavior", BEHAVIOR_RULES[behavior]),
@@ -179,12 +198,15 @@ class Judge:
         expected_answer: str,
         answer: str,
         sources: Sources | None = None,
+        history: Sequence[Turn] = (),
     ) -> Verdict:
-        """The judge's verdict, against these sources (default: rebuilt by keyword search). A
-        failed call or an unreadable reply is a judge error (passed is None), which the eval
-        counts as a failure."""
+        """The judge's verdict, against these sources (default: rebuilt by keyword search) and,
+        for a follow-up, the earlier turns the bot saw. A failed call or an unreadable reply is a
+        judge error (passed is None), which the eval counts as a failure."""
         sources = sources or self.sources(question)
-        messages = self.messages(question, behavior, expected_answer, answer, sources.chunks)
+        messages = self.messages(
+            question, behavior, expected_answer, answer, sources.chunks, history
+        )
         try:
             reply = self.client.complete(SYSTEM, messages)
             return parse_verdict(reply.text)

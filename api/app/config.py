@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     query_rewriter_model: str = "claude-haiku-4-5-20251001"
     query_rewriter_timeout_seconds: float = 4.0  # no retry: past this, search the question only
     chat_max_question_chars: int = 1000
+    # Follow-up questions (#76): /chat takes the conversation's last few turns as history, so the
+    # rewriter can make "that page" a standalone question and the answer reads in context.
+    chat_history_turns: int = 3  # question-and-answer pairs kept, newest; 0: ignore history
+    chat_history_max_chars: int = 6000  # every kept question and answer together
     # Sites allowed to call the API from a browser (the widget), comma-separated. The default is
     # the local demo page (widget/README.md); production lists DSU's site. "*" is refused.
     allowed_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
