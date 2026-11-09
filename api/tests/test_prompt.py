@@ -56,6 +56,15 @@ def test_system_prompt_file_loads_with_the_grounding_rules():
         assert phrase in text
 
 
+def test_system_prompt_asks_for_short_answers_without_dropping_facts():
+    text = load_system_prompt()
+    assert "Lead with the direct answer in 2 to 4 sentences" in text
+    assert "offer to explain any of them in more detail" in text
+    assert "never fewer facts" in text
+    assert "Give every deadline that is still open" in text
+    assert "call 911" in text
+
+
 def test_empty_system_prompt_is_an_error(tmp_path):
     empty = tmp_path / "system.md"
     empty.write_text("  \n")

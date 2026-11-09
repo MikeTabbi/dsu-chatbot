@@ -180,6 +180,11 @@ python -m eval.run --calibrate             # the judge on calibration.csv; repor
   A `no` with a passing retrieval run means Claude had the page but didn't mark it as used. It
   prints the number of questions and asks before making real Claude calls unless `--yes` is passed. It uses `CLAUDE_MODEL` and `ANTHROPIC_API_KEY` from the
   environment or `.env`.
+- Full mode also prints answer size and speed for the answered cases: average, median, and
+  longest answer in words, `/chat` latency (median, p90, max: rewrite, rerank, and answer
+  together), and Claude's output tokens. Each result saves its `latency_ms` and `output_tokens`.
+  Output tokens include the model's hidden thinking, so they run well above the answer's words.
+  Compare these before and after a prompt change that affects answer length (#80).
 
 Both modes print a per-case table and an overall score, and save every result (including full
 answers) to `eval/results/<timestamp>-<mode>.json`, which is gitignored. Full mode also saves
