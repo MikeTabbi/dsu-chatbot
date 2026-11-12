@@ -367,6 +367,36 @@ def test_a_case_without_earlier_questions_sends_no_history(cases_csv, retriever)
     assert "<history>" not in fake.calls[0][1][0]["content"]
 
 
+def test_full_mode_saves_each_answers_latency_and_output_tokens(cases_csv, retriever):
+    fake = FakeClaudeClient(answer="Wynder Tower has carpet.\n<cited>1</cited>")
+    [result] = run_full(load_cases(cases_csv)[:1], fake, retriever, k=2)
+    assert isinstance(result.latency_ms, int) and result.latency_ms >= 0
+    assert result.output_tokens == 5  # the fake counts the reply's words
+    saved = run._saved(result)
+    assert saved["latency_ms"] == result.latency_ms and saved["output_tokens"] == 5
+
+
+def test_answer_stats_report_words_and_latency_of_answered_cases():
+    def answered(question, words, latency_ms, status=200):
+        return run.Result(
+            question, "answer", True, [], [], status=status, answer="word " * words,
+            latency_ms=latency_ms, output_tokens=words,
+        )  # fmt: skip
+
+    stats = run.answer_stats(
+        [
+            answered("short one", 40, 3000),
+            answered("long one", 200, 9000),
+            answered("middle", 60, 5000),
+            answered("failed", 900, 100, status=503),  # not an answer: left out
+        ]
+    )
+    assert "Answers: 3, words avg 100, median 60, longest 200 (long one)" in stats
+    assert "Latency ms: median 5000, p90 9000, max 9000" in stats
+    assert "Output tokens: avg 100, max 200" in stats
+    assert run.answer_stats([]) == "Answers: none"
+
+
 def test_full_mode_records_claude_errors(cases_csv, retriever):
     class Failing:
         def complete(self, system, messages):

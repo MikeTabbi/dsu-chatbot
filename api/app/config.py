@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr = SecretStr("")  # SecretStr: shows as ********** if printed
     claude_client: str = "fake"  # fake (canned answers, no key) | anthropic | azure (#19)
     claude_model: str = "claude-opus-5"  # placeholder until the model is chosen in #19
-    claude_max_output_tokens: int = 4096
+    claude_max_output_tokens: int = 2048  # includes thinking tokens; see README "Claude client"
     claude_timeout_seconds: float = 30.0
     judge_model: str = ""  # the eval's Claude grader (eval/judge.py); blank: CLAUDE_MODEL
     search_endpoint: str = ""

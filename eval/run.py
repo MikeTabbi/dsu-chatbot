@@ -152,6 +152,10 @@ class Result:
     # no answers), and the standalone question /chat searched (full: as the exchange log keeps it)
     history: list[dict] | None = None
     standalone: str | None = None
+    # full: the graded request's /chat latency (rewrite, rerank, and answer) and Claude's output
+    # tokens for the answer, as the exchange log records them
+    latency_ms: int | None = None
+    output_tokens: int | None = None
 
 
 def _split(value: str) -> list[str]:
@@ -384,16 +388,20 @@ def run_retrieval(
 
 class ChunkIdLog(NullExchangeLog):
     """Keeps only the chunk IDs /chat records for each request (the chunks it gave Claude, after
-    reranking, in order) and the question it logged (a follow-up's standalone question). Nothing
-    is stored past the run."""
+    reranking, in order), the question it logged (a follow-up's standalone question), and the
+    request's latency and output tokens. Nothing is stored past the run."""
 
     def __init__(self):
         self.chunk_ids: dict[str, list[str]] = {}
         self.questions: dict[str, str] = {}
+        self.latency_ms: dict[str, int] = {}
+        self.output_tokens: dict[str, int | None] = {}
 
     def add(self, exchange: Exchange) -> None:
         self.chunk_ids[exchange.request_id] = exchange.chunk_ids
         self.questions[exchange.request_id] = exchange.question
+        self.latency_ms[exchange.request_id] = exchange.latency_ms
+        self.output_tokens[exchange.request_id] = exchange.output_tokens
 
 
 def run_full(
@@ -453,6 +461,9 @@ def run_full(
                     )
                 result = check_answer(case, response.status_code, body, verdict)
                 result.chunk_ids = chunk_ids
+                request_id = body.get("request_id")
+                result.latency_ms = chunk_log.latency_ms.get(request_id)
+                result.output_tokens = chunk_log.output_tokens.get(request_id)
                 if case.prior_questions:
                     result.history = history
                     result.standalone = chunk_log.questions.get(body.get("request_id"))
@@ -546,13 +557,41 @@ def print_full(results: list[Result]) -> None:
     passed, graded = score(results)
     print(f"\nOverall: {passed}/{graded} passed ({passed / graded:.0%})" if graded else "")
     print("src: an expected URL was among the sources the answer cites")
+    print(answer_stats(results))
+
+
+def _words(text: str) -> int:
+    return len(text.split())
+
+
+def answer_stats(results: list[Result]) -> str:
+    """Answer length in words (answered cases) and /chat latency, for tracking answer size."""
+    answered = [r for r in results if r.status == 200 and r.answer]
+    if not answered:
+        return "Answers: none"
+    words = sorted(_words(r.answer) for r in answered)
+    longest = max(answered, key=lambda r: _words(r.answer))
+    line = (
+        f"Answers: {len(answered)}, words avg {sum(words) / len(words):.0f}, "
+        f"median {words[len(words) // 2]}, longest {words[-1]} ({_short(longest.question, 50)})"
+    )
+    latency = sorted(r.latency_ms for r in answered if r.latency_ms is not None)
+    if latency:
+        n = len(latency)
+        line += f"\nLatency ms: median {latency[n // 2]}, p90 {latency[int(n * 0.9)]}"
+        line += f", max {latency[-1]}"
+    tokens = [r.output_tokens for r in answered if r.output_tokens is not None]
+    if tokens:
+        line += f"\nOutput tokens: avg {sum(tokens) / len(tokens):.0f}, max {max(tokens)}"
+    return line
 
 
 def _saved(result: Result) -> dict:
-    """The result as saved; the judge, rerank, rewrite, chunk_ids, history, and standalone keys
-    only appear when set."""
+    """The result as saved; the judge, rerank, rewrite, chunk_ids, history, standalone, latency_ms,
+    and output_tokens keys only appear when set."""
     data = asdict(result)
-    for key in ("judge", "rerank", "rewrite", "chunk_ids", "history", "standalone"):
+    keys = ("judge", "rerank", "rewrite", "chunk_ids", "history", "standalone")
+    for key in (*keys, "latency_ms", "output_tokens"):
         if data[key] is None:
             del data[key]
     return data
