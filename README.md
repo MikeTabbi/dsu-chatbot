@@ -339,6 +339,51 @@ CLAUDE_CLIENT=anthropic uvicorn api.app.main:app
 python -c "import httpx; print(httpx.post('http://localhost:8000/chat', json={'question': 'How do I register for classes?'}, timeout=60).json())"
 ```
 
+### Streaming
+
+`POST /chat/stream` takes the same body as `/chat` and runs the same steps (rewrite, retrieval,
+rerank, prompt), but answers with server-sent events (`text/event-stream`) while Claude writes,
+so the first words show in a couple of seconds instead of after the whole answer. The widget uses
+it, and falls back to `/chat` if streaming fails or isn't available. `/chat` is unchanged (the
+eval uses it).
+
+```text
+event: delta
+data: {"text": "Tubman-Lawson and Warren-"}
+
+event: done
+data: {"answer": "...", "sources": [...], "request_id": "d772...", "outcome": "answered"}
+```
+
+- `delta` events carry the next piece of the answer. The `<cited>` marker is never sent, even in
+  part: text that could be the start of a marker is held back until it's clear it isn't
+  (`CitationFilter` in `api/app/prompt.py`).
+- The last event is `done` (the whole answer exactly as `/chat` returns it, the cited sources, the
+  request ID, and the outcome: `answered`, `not_found`, or `no_sources`) or, if the answer failed
+  before or while streaming, `error` with a friendly `detail` and the `request_id`, never error
+  details. The widget redraws the final answer from `done`.
+- A bad question (422), rate limits (429), the daily budget (503 with `Retry-After`), and the
+  request size and JSON checks (413, 415) are the same JSON responses `/chat` sends, before any
+  event. `/chat` and `/chat/stream` share the per-client limits.
+- The exchange is logged once, redacted, after the stream ends. A visitor who leaves mid-answer
+  stops the Claude call; that request logs `outcome=disconnected` in the app log and nothing in
+  the exchange log.
+
+**Hosting: don't buffer the stream.** Anything between the browser and the API that buffers or
+compresses responses holds the answer back until it's complete, which looks like no streaming.
+
+- The API sends `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` with the
+  stream, which covers nginx's default buffering and most CDNs.
+- uvicorn needs no setting. Don't add response compression (`GZipMiddleware`, a proxy's gzip)
+  for `text/event-stream`.
+- nginx in front of the API: `proxy_buffering off;` and `proxy_http_version 1.1;` for
+  `location /chat/stream` (the header above usually suffices), and a `proxy_read_timeout` above
+  the longest answer (60 s+).
+- Azure App Service streams as is. Azure Front Door or Application Gateway: turn off compression
+  (and caching) for `/chat/stream`, or the stream arrives in one piece.
+- If streaming is still buffered somewhere, the widget keeps working: it shows the answer when the
+  stream completes. If a proxy refuses the stream (404, 405, 501, 502, 504), it asks `/chat`.
+
 ## Exchange log and feedback
 
 Every `/chat` exchange is stored so wrong answers and missing content can be found and fixed.

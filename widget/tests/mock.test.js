@@ -34,6 +34,8 @@ function loadMock(search) {
     navigator: window.navigator,
     URLSearchParams,
     Response,
+    ReadableStream,
+    TextEncoder,
     TypeError,
     JSON,
     String,
@@ -65,10 +67,16 @@ test("mock mode never makes a network request", async () => {
     "Where is DSU? (rate limit)",
     "Where is DSU? (network)",
     "Where is DSU? (too long)",
+    "Meal plans (streaming)",
+    "Meal plans (stream error)",
+    "Where is DSU? (no stream)",
     "anything else",
   ];
   for (const question of questions) {
-    await ask(window, question).catch(() => {}); // the network state rejects, like a real failure
+    for (const url of ["http://localhost:8000/chat", "http://localhost:8000/chat/stream"]) {
+      const response = await ask(window, question, url).catch(() => null); // network rejects
+      await response?.text(); // read every streamed body to the end
+    }
   }
   await ask(window, "short", "https://example.com/other").catch(() => {});
   assert.deepEqual(network, []);
@@ -162,4 +170,70 @@ test("the embed code can't turn on mock mode", () => {
   const demo = fs.readFileSync(path.join(WIDGET, "demo.html"), "utf8");
   const widgetTag = demo.match(/<script[^>]*src="dsu-chat\.js"[^>]*>/)[0];
   assert.doesNotMatch(widgetTag, /mock/i);
+});
+
+// Streaming in mock mode -------------------------------------------------------------------------
+
+const STREAM = "http://localhost:8000/chat/stream";
+
+/** Asks like the widget does (stream first, /chat as the fallback) and collects what it shows. */
+async function widgetAsks(window, question) {
+  const { requestAnswer } = require("../dsu-chat.js");
+  const texts = [];
+  const result = await requestAnswer(
+    (url, init) => window.fetch(url, init),
+    "http://localhost:8000",
+    { question, history: [] },
+    { onText: (t) => texts.push(t) }
+  );
+  return { result, texts };
+}
+
+test("every answer streams in pieces, then ends with the same answer /chat gives", async () => {
+  const { window, network } = loadMock("?mock=1");
+  for (const question of ["short", "long answer", "personal", "off topic", "slow", "streaming"]) {
+    const regular = await (await ask(window, question)).json();
+    const { result, texts } = await widgetAsks(window, question);
+    assert.ok(texts.length > 3, `${question}: streamed in pieces`);
+    assert.equal(texts.at(-1), regular.answer, question);
+    assert.deepEqual(result, { status: 200, ok: true, data: { ...regular, outcome: "answered" } });
+  }
+  assert.deepEqual(network, []);
+});
+
+test("the streaming state is a real event stream, slow enough to watch", async () => {
+  const { window } = loadMock("?mock=1");
+  const response = await ask(window, "meal plans (streaming)", STREAM);
+  assert.equal(response.headers.get("Content-Type"), "text/event-stream");
+  const stepMs = Number(MOCK_SOURCE.match(/name: "streaming",[\s\S]*?stepMs: (\d+)/)[1]);
+  assert.ok(stepMs >= 100); // the pause between pieces
+});
+
+test("the stream error state breaks off with the error event, offline", async () => {
+  const { window, network } = loadMock("?mock=1");
+  const { result, texts } = await widgetAsks(window, "meal plans (stream error)");
+  assert.ok(texts.length > 0);
+  assert.equal(result.ok, false);
+  assert.match(result.data.detail, /can't answer right now/);
+  assert.deepEqual(network, []);
+});
+
+test("the no stream state falls back to /chat, offline", async () => {
+  const { window, network } = loadMock("?mock=1");
+  const { result, texts } = await widgetAsks(window, "Where is DSU? (no stream)");
+  assert.deepEqual(texts, []);
+  assert.equal(result.ok, true);
+  assert.match(result.data.answer, /1200 N\. DuPont Highway/);
+  assert.deepEqual(network, []);
+});
+
+test("errors and the network state behave the same when streaming, offline", async () => {
+  const { window, network } = loadMock("?mock=1");
+  for (const [question, status] of [["(rate limit)", 429], ["(503)", 503], ["(too long)", 422]]) {
+    const { result } = await widgetAsks(window, question);
+    assert.equal(result.status, status);
+    assert.equal(typeof result.data.detail, "string");
+  }
+  await assert.rejects(widgetAsks(window, "(network)"), TypeError);
+  assert.deepEqual(network, []);
 });

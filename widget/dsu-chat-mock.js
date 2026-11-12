@@ -8,6 +8,12 @@
  *
  * The answers are real /chat output from an eval run (eval/results, Claude Sonnet). Thumbs
  * up/down (POST /feedback) always succeed here, and the rating is kept nowhere.
+ *
+ * The widget asks POST /chat/stream first. Here every answer streams a few words at a time, as
+ * server-sent events, after the state's delay; errors (429, 503, 422) are the same JSON as /chat.
+ * Three states are about streaming itself: "streaming" (slow, to watch it or screenshot it mid-way),
+ * "stream error" (breaks off with an error event), and "no stream" (the stream endpoint is missing,
+ * so the widget falls back to POST /chat).
  */
 (function () {
   "use strict";
@@ -20,6 +26,27 @@
   // Each state: the words that pick it (checked in this order), how long the reply takes, and
   // the reply. `reply: null` means a network error. A question with none of the words gets "short".
   const STATES = [
+    {
+      name: "stream error",
+      words: ["stream error", "breaks off"],
+      status: 200,
+      reply: "long",
+      breakAfter: 30, // words; then an error event, as when Claude fails mid-answer
+    },
+    {
+      name: "no stream",
+      words: ["no stream", "fallback"],
+      status: 200,
+      reply: "short",
+      noStream: true, // /chat/stream answers 404, like an API without streaming
+    },
+    {
+      name: "streaming",
+      words: ["stream"],
+      status: 200,
+      reply: "long",
+      stepMs: 150, // slow enough to watch the words arrive
+    },
     {
       name: "new message",
       words: ["new message"],
@@ -146,6 +173,8 @@
   ];
 
   const DEFAULT_DELAY_MS = 800; // long enough to see the typing indicator
+  const STEP_MS = 40; // between streamed pieces
+  const WORDS_PER_PIECE = 2;
 
   function pickState(question) {
     const q = String(question).toLowerCase();
@@ -180,7 +209,8 @@
     const url = String(input && input.url ? input.url : input);
     if (/\/feedback$/.test(url)) return feedbackReply(init);
     let state = pickState(questionFrom(init));
-    if (!/\/chat$/.test(url)) state = STATES.find((s) => s.name === "network"); // never go out
+    const streams = /\/chat\/stream$/.test(url);
+    if (!streams && !/\/chat$/.test(url)) state = STATES.find((s) => s.name === "network"); // never go out
     const reply =
       typeof state.reply === "string" ? STATES.find((s) => s.name === state.reply).reply : state.reply;
     const status = typeof state.reply === "string" ? 200 : state.status;
@@ -189,11 +219,53 @@
       setTimeout(() => {
         if (reply === null) {
           reject(new TypeError("Failed to fetch (mock network error)"));
+        } else if (streams && state.noStream) {
+          const headers = { "Content-Type": "application/json" };
+          resolve(new Response(JSON.stringify({ detail: "Not Found" }), { status: 404, headers }));
+        } else if (streams && status === 200) {
+          resolve(streamReply(reply, state));
         } else {
           const headers = { "Content-Type": "application/json", ...state.headers };
           resolve(new Response(JSON.stringify(reply), { status, headers }));
         }
       }, state.delayMs ?? DEFAULT_DELAY_MS);
+    });
+  }
+
+  /** The reply as /chat/stream sends it: a few words per "delta" event, then "done" (or "error"
+   * after state.breakAfter words). */
+  function streamReply(reply, state) {
+    const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+    const words = reply.answer.match(/\s*\S+/g) || [];
+    const events = [];
+    const end = state.breakAfter ? Math.min(state.breakAfter, words.length) : words.length;
+    for (let i = 0; i < end; i += WORDS_PER_PIECE) {
+      events.push(event("delta", { text: words.slice(i, i + WORDS_PER_PIECE).join("") }));
+    }
+    events.push(
+      state.breakAfter
+        ? event("error", { detail: UNAVAILABLE, request_id: "mock-stream-error" })
+        : event("done", { ...reply, outcome: "answered" })
+    );
+    const encoder = new TextEncoder();
+    let cancelled = false; // the widget stops reading once the last event arrives
+    const body = new ReadableStream({
+      start(controller) {
+        const next = (i) => {
+          if (cancelled) return;
+          if (i === events.length) return controller.close();
+          controller.enqueue(encoder.encode(events[i]));
+          setTimeout(() => next(i + 1), state.stepMs ?? STEP_MS);
+        };
+        next(0);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
     });
   }
 

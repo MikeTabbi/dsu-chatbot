@@ -1,15 +1,18 @@
 """Backend API entry point."""
 
 import functools
+import json
 import logging
 import time
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.app.claude_client import ClaudeClient, ClaudeError, ClaudeReply, get_claude_client
@@ -26,6 +29,8 @@ from api.app.exchange_log import (
     says_not_found,
 )
 from api.app.prompt import (
+    CitationFilter,
+    Prompt,
     Turn,
     build_prompt,
     fit_history,
@@ -75,7 +80,7 @@ app = FastAPI(title="DSU Chatbot API", version="0.1.0")
 # Added before CORS so CORS wraps it: the widget can read a 413 or 415 like any other error.
 app.add_middleware(
     RequestGuard,
-    paths=["/chat", "/feedback"],
+    paths=["/chat", "/chat/stream", "/feedback"],
     max_bytes=lambda: _current_settings().max_request_bytes,
 )
 # Lets the widget on the listed sites call the API. No cookies, so no credentials.
@@ -241,19 +246,44 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit_chat)])
-def chat(
+@dataclass
+class Prepared:
+    """One question, ready for Claude: everything /chat and /chat/stream do before the answer."""
+
+    request_id: str
+    start: float
+    standalone: str  # the question searched, reranked, and logged (a follow-up made standalone)
+    typed: str  # what the student typed in this conversation, so its echo is redacted
+    chunks: list[Chunk]  # empty: nothing found, so Claude isn't asked
+    prompt: Prompt | None
+    exchanges: ExchangeLog
+
+    def record(self, outcome: Outcome, answer: str, sources=(), reply: ClaudeReply | None = None):
+        _record(
+            self.exchanges,
+            self.request_id,
+            self.start,
+            self.standalone,
+            self.typed,
+            answer,
+            outcome,
+            self.chunks,
+            sources,
+            reply,
+        )
+
+
+def prepare(
     request: ChatRequest,
-    retriever: Annotated[Retriever, Depends(get_chat_retriever)],
-    reranker: Annotated[Reranker | None, Depends(get_chat_reranker)],
-    rewriter: Annotated[QueryRewriter | None, Depends(get_chat_query_rewriter)],
-    client: Annotated[ClaudeClient, Depends(get_chat_client)],
-    config: Annotated[Settings, Depends(get_settings)],
-    exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
-    limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
-):
-    """Answer one question from retrieved DSU content, with the sources the answer cites. Earlier
-    turns, when sent, only help read a follow-up: this turn's sources are the only sources."""
+    retriever: Retriever,
+    reranker: Reranker | None,
+    rewriter: QueryRewriter | None,
+    config: Settings,
+    exchanges: ExchangeLog,
+    limiter: RateLimiter,
+) -> Prepared | JSONResponse:
+    """Check the question, rewrite it, retrieve and rerank its sources, and build the prompt.
+    A bad question raises a 422; past the daily Claude budget, the 503 to send is returned."""
     request_id = uuid.uuid4().hex
     start = time.perf_counter()
     question = request.question.strip()
@@ -292,16 +322,9 @@ def chat(
     chunks = [r.chunk for r in candidates[:k]]
     # What the student typed in this conversation, so an answer's echo of it is redacted too.
     typed = "\n".join([question, *(t.question for t in history)])
-
-    def record(outcome: Outcome, answer: str, sources=(), reply: ClaudeReply | None = None):
-        _record(
-            exchanges, request_id, start, standalone, typed, answer, outcome, chunks, sources, reply
-        )
-
+    prepared = Prepared(request_id, start, standalone, typed, chunks, None, exchanges)
     if not chunks:
-        _log_request(request_id, start, chunks, "no_content")
-        record("no_sources", NO_CONTENT_ANSWER)
-        return ChatResponse(answer=NO_CONTENT_ANSWER, sources=[], request_id=request_id)
+        return prepared
 
     # Questions with no chunks never call Claude for an answer, so only their rewrite counted.
     if blocked := limiter.hit("global:claude", [budget]):
@@ -323,36 +346,147 @@ def chat(
             reranked.outcome,
             reranked.latency_ms,
         )
-    chunks = [r.chunk for r in reranked.results]
-
+    prepared.chunks = [r.chunk for r in reranked.results]
     # The question as asked, with the history to read it by; every source is from this turn.
-    prompt = build_prompt(question, chunks, history=history)
-    try:
-        reply = client.complete(prompt.system, prompt.messages)
-    except ClaudeError as e:
-        _log_request(request_id, start, chunks, f"claude_error reason={e.reason}")
-        record("error", UNAVAILABLE_ANSWER)
-        return JSONResponse(
-            status_code=503, content={"detail": UNAVAILABLE_ANSWER, "request_id": request_id}
-        )
+    prepared.prompt = build_prompt(question, prepared.chunks, history=history)
+    return prepared
 
-    answer = parse_citations(reply.text, len(chunks))
+
+def no_content(p: Prepared) -> ChatResponse:
+    """The answer when no DSU content matched: Claude is never asked."""
+    _log_request(p.request_id, p.start, p.chunks, "no_content")
+    p.record("no_sources", NO_CONTENT_ANSWER)
+    return ChatResponse(answer=NO_CONTENT_ANSWER, sources=[], request_id=p.request_id)
+
+
+def unavailable(p: Prepared, reason: str, outcome: str = "claude_error") -> dict[str, str]:
+    """Logs a failed answer (the reason never reaches the student) and returns what they see."""
+    _log_request(p.request_id, p.start, p.chunks, f"{outcome} reason={reason}")
+    p.record("error", UNAVAILABLE_ANSWER)
+    return {"detail": UNAVAILABLE_ANSWER, "request_id": p.request_id}
+
+
+def answered(p: Prepared, reply: ClaudeReply) -> tuple[ChatResponse, Outcome]:
+    """Claude's reply as the student sees it, with the sources it cites; logged and recorded."""
+    answer = parse_citations(reply.text, len(p.chunks))
     # A page the answer links is a page it used, even if its <cited> line leaves it out (a decline
     # that still links DSU's tuition page). A desu.edu link in no source's URL or text (possibly
     # made up) is logged, never shown.
-    linked = linked_sources(answer.text, chunks)
+    linked = linked_sources(answer.text, p.chunks)
     for url in linked.unknown:
         log.warning(
-            "answer links a page not among its sources request_id=%s url=%s", request_id, url
+            "answer links a page not among its sources request_id=%s url=%s", p.request_id, url
         )
     cited = sorted(set(answer.cited) | set(linked.cited))
-    sources = _sources([chunks[n - 1] for n in cited])
+    sources = _sources([p.chunks[n - 1] for n in cited])
     # An answer that says it couldn't find something is logged as not_found, so the exchange
     # log's review lists it with the thumbs-down answers: a retrieval miss or a content gap.
     outcome = "not_found" if says_not_found(answer.text) else "answered"
-    _log_request(request_id, start, chunks, f"{outcome} cited={len(cited)}")
-    record(outcome, answer.text, sources, reply)
-    return ChatResponse(answer=answer.text, sources=sources, request_id=request_id)
+    _log_request(p.request_id, p.start, p.chunks, f"{outcome} cited={len(cited)}")
+    p.record(outcome, answer.text, sources, reply)
+    return ChatResponse(answer=answer.text, sources=sources, request_id=p.request_id), outcome
+
+
+@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit_chat)])
+def chat(
+    request: ChatRequest,
+    retriever: Annotated[Retriever, Depends(get_chat_retriever)],
+    reranker: Annotated[Reranker | None, Depends(get_chat_reranker)],
+    rewriter: Annotated[QueryRewriter | None, Depends(get_chat_query_rewriter)],
+    client: Annotated[ClaudeClient, Depends(get_chat_client)],
+    config: Annotated[Settings, Depends(get_settings)],
+    exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
+    limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
+):
+    """Answer one question from retrieved DSU content, with the sources the answer cites. Earlier
+    turns, when sent, only help read a follow-up: this turn's sources are the only sources."""
+    p = prepare(request, retriever, reranker, rewriter, config, exchanges, limiter)
+    if isinstance(p, JSONResponse):
+        return p
+    if p.prompt is None:
+        return no_content(p)
+    try:
+        reply = client.complete(p.prompt.system, p.prompt.messages)
+    except ClaudeError as e:
+        return JSONResponse(status_code=503, content=unavailable(p, e.reason))
+    return answered(p, reply)[0]
+
+
+@app.post("/chat/stream", dependencies=[Depends(limit_chat)])
+def chat_stream(
+    request: ChatRequest,
+    retriever: Annotated[Retriever, Depends(get_chat_retriever)],
+    reranker: Annotated[Reranker | None, Depends(get_chat_reranker)],
+    rewriter: Annotated[QueryRewriter | None, Depends(get_chat_query_rewriter)],
+    client: Annotated[ClaudeClient, Depends(get_chat_client)],
+    config: Annotated[Settings, Depends(get_settings)],
+    exchanges: Annotated[ExchangeLog, Depends(get_chat_exchange_log)],
+    limiter: Annotated[RateLimiter, Depends(get_chat_rate_limiter)],
+):
+    """/chat, streamed as server-sent events while Claude writes the answer:
+
+    - `delta` {"text"}: the next piece of the answer, never any part of a citation marker
+    - `done` {"answer", "sources", "request_id", "outcome"}: last, once the answer is complete;
+      `answer` is the whole answer exactly as /chat would return it
+    - `error` {"detail", "request_id"}: last, instead of `done`, when the answer failed
+
+    Refusals before any work (a bad question 422, rate limits 429, the daily budget 503, and the
+    request guard's 413 and 415) are the same JSON responses /chat sends. Shares /chat's
+    per-client limits. The exchange is recorded once, after the stream ends."""
+    try:
+        p = prepare(request, retriever, reranker, rewriter, config, exchanges, limiter)
+    except HTTPException:
+        raise
+    except Exception as e:  # retrieval or the rewriter failed: a friendly error, not a 500
+        log.warning("chat stream failed before the answer error=%s", _name(e))
+        failed = {"detail": UNAVAILABLE_ANSWER, "request_id": uuid.uuid4().hex}
+        return _event_stream(iter([_event("error", failed)]))
+    if isinstance(p, JSONResponse):
+        return p
+    if p.prompt is None:
+        done = {**no_content(p).model_dump(), "outcome": "no_sources"}
+        return _event_stream(iter([_event("done", done)]))
+    return _event_stream(_stream_answer(p, client))
+
+
+def _stream_answer(p: Prepared, client: ClaudeClient) -> Iterator[str]:
+    """The events for one answer. Every way it can end records the exchange exactly once, except
+    a student who leaves mid-answer: that only logs outcome=disconnected."""
+    shown = CitationFilter()
+    try:
+        reply = None
+        for piece in client.stream(p.prompt.system, p.prompt.messages):
+            if isinstance(piece, ClaudeReply):
+                reply = piece
+            elif text := shown.feed(piece):
+                yield _event("delta", {"text": text})
+        if reply is None:
+            raise ClaudeError("no_answer", "the stream ended without a reply")
+        if text := shown.flush():
+            yield _event("delta", {"text": text})
+    except ClaudeError as e:
+        yield _event("error", unavailable(p, e.reason))
+        return
+    except GeneratorExit:  # the student closed the page; the Claude call stops with this
+        _log_request(p.request_id, p.start, p.chunks, "disconnected")
+        raise
+    except Exception as e:  # never a stack trace in the stream: the type is logged, not shown
+        yield _event("error", unavailable(p, _name(e), outcome="stream_error"))
+        return
+    response, outcome = answered(p, reply)
+    yield _event("done", {**response.model_dump(), "outcome": outcome})
+
+
+def _event(name: str, data: dict) -> str:
+    """One server-sent event. The JSON is on one line, so it needs a single data: field."""
+    return f"event: {name}\ndata: {json.dumps(data)}\n\n"
+
+
+def _event_stream(events: Iterator[str]) -> StreamingResponse:
+    # no-cache and no-transform keep proxies from holding or compressing the stream, and
+    # X-Accel-Buffering turns off nginx's buffering for this response (see README, "Streaming").
+    headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+    return StreamingResponse(events, media_type="text/event-stream", headers=headers)
 
 
 @app.post("/feedback", response_model=FeedbackResponse, dependencies=[Depends(limit_feedback)])

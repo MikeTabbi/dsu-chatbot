@@ -174,6 +174,63 @@ def parse_citations(answer: str, source_count: int) -> CitedAnswer:
     return CitedAnswer(text, sorted(cited))
 
 
+class CitationFilter:
+    """The answer text as it streams, without its citation markers, so a student never sees one,
+    not even its first few characters. feed() takes each new piece and returns what is safe to
+    show now; flush() returns the rest once the answer is complete.
+
+    Text that could be the start of a <cited> or </cited> tag (a trailing "<", "<ci", ...) is held
+    back until the next piece shows whether it is one. Everything from <cited> to </cited> is
+    dropped, and a stray </cited> is dropped too, as parse_citations does. The final text
+    parse_citations gives is still what the student keeps: this only decides what shows early.
+    """
+
+    TAGS = ("<cited>", "</cited>")
+
+    def __init__(self) -> None:
+        self._pending = ""  # text not yet shown: a possible tag start, or an open marker
+        self._in_marker = False
+
+    def feed(self, piece: str) -> str:
+        self._pending += piece
+        shown = []
+        while self._pending:
+            lower = self._pending.lower()
+            if self._in_marker:
+                end = lower.find("</cited>")
+                if end < 0:
+                    break  # the marker hasn't closed yet: show nothing
+                self._pending = self._pending[end + len("</cited>") :]
+                self._in_marker = False
+                continue
+            starts = [(lower.find(tag), tag) for tag in self.TAGS if tag in lower]
+            if starts:
+                at, tag = min(starts)
+                shown.append(self._pending[:at])
+                self._pending = self._pending[at + len(tag) :]
+                self._in_marker = tag == "<cited>"
+                continue
+            keep = self._possible_tag_start(lower)
+            shown.append(self._pending[: len(self._pending) - keep])
+            self._pending = self._pending[len(self._pending) - keep :]
+            break
+        return "".join(shown)
+
+    def flush(self) -> str:
+        """What's left once the answer is complete: a held-back "<" that wasn't a tag after all.
+        An unclosed marker at the end (an answer cut off) is never shown."""
+        rest = "" if self._in_marker else self._pending
+        self._pending = ""
+        return rest
+
+    def _possible_tag_start(self, lower: str) -> int:
+        """How many characters at the end of the text could begin a tag."""
+        for n in range(min(len(lower), max(map(len, self.TAGS)) - 1), 0, -1):
+            if any(tag.startswith(lower[-n:]) for tag in self.TAGS):
+                return n
+        return 0
+
+
 @dataclass
 class LinkedSources:
     cited: list[int]  # source ids (1-based) whose URL the answer links exactly

@@ -12,12 +12,13 @@
  * as HTML. renderMarkdown() builds DOM nodes with createElement/createTextNode only, supports a
  * few formats (bold, italic, lists, links), and makes links only for http/https URLs. Anything
  * else, including HTML tags and javascript: links, shows up as plain text. Never use innerHTML,
- * outerHTML, insertAdjacentHTML, or document.write with answer, source, or user text.
+ * outerHTML, insertAdjacentHTML, or document.write with answer, source, or user text. A streamed
+ * answer is no different: each update redraws the text so far with renderMarkdown.
  */
 (function () {
   "use strict";
 
-  const VERSION = "0.10.0"; // bump when you change this file or the CSS (see README)
+  const VERSION = "0.11.0"; // bump when you change this file or the CSS (see README)
   const HOST_ID = "dsu-chat-widget";
   const REQUEST_TIMEOUT_MS = 60000;
   const PANEL_CLOSE_MS = 150; // the panel's closing fade in the CSS (.panel.closing)
@@ -105,6 +106,123 @@
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     ];
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Streaming: POST /chat/stream sends the answer as server-sent events while it's written
+  // ("delta" {text}, then "done" {answer, sources, request_id, outcome} or "error" {detail}).
+  // Streamed text is only ever rendered with renderMarkdown, like any other answer.
+  // ---------------------------------------------------------------------------------------------
+
+  // Answers from the stream endpoint that mean "no streaming here" (an older API, or a proxy that
+  // can't pass the stream through): ask POST /chat instead. Other errors (422, 429, 503) are the
+  // same /chat would give, so they're shown, not retried.
+  const STREAM_FALLBACK_STATUSES = [404, 405, 501, 502, 504];
+
+  /** Reads server-sent events from text that arrives in pieces: push() returns the events each
+   * piece completes as [{ event, data }]; end() returns the last one if the text stopped without
+   * a blank line. Comments and fields other than event and data are ignored. */
+  function sseParser() {
+    let buffer = "";
+    let event = "message";
+    let data = [];
+    const line = (text, out) => {
+      if (text === "") {
+        if (data.length) out.push({ event, data: data.join("\n") });
+        event = "message";
+        data = [];
+      } else if (!text.startsWith(":")) {
+        const colon = text.indexOf(":");
+        const field = colon < 0 ? text : text.slice(0, colon);
+        let value = colon < 0 ? "" : text.slice(colon + 1);
+        if (value.startsWith(" ")) value = value.slice(1);
+        if (field === "event") event = value;
+        else if (field === "data") data.push(value);
+      }
+    };
+    return {
+      push(text) {
+        const out = [];
+        buffer += text;
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // not complete yet
+        for (const l of lines) line(l.endsWith("\r") ? l.slice(0, -1) : l, out);
+        return out;
+      },
+      end(text = "") {
+        const out = this.push(`${text}\n\n`);
+        buffer = "";
+        return out;
+      },
+    };
+  }
+
+  /** The fetch() options for a JSON POST to /chat or /chat/stream. */
+  function postJson(payload, signal) {
+    return {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    };
+  }
+
+  /**
+   * Asks POST /chat/stream. `onText(text)` gets the whole answer so far each time more arrives.
+   * Returns { status, ok, data } like a /chat response (data is the "done" event's answer), or
+   * null when streaming didn't work and /chat should be asked instead: the browser can't read a
+   * stream, the API has no stream endpoint, or the stream stopped before its last event.
+   */
+  async function streamAnswer(fetchFn, apiUrl, payload, onText, signal) {
+    if (typeof TextDecoder !== "function") return null;
+    const response = await fetchFn(`${apiUrl}/chat/stream`, postJson(payload, signal));
+    const type = (response.headers && response.headers.get("Content-Type")) || "";
+    if (!type.toLowerCase().startsWith("text/event-stream")) {
+      if (response.ok || STREAM_FALLBACK_STATUSES.includes(response.status)) return null;
+      return { status: response.status, ok: false, data: await response.json().catch(() => null) };
+    }
+    if (!response.body || typeof response.body.getReader !== "function") return null;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const parser = sseParser();
+    let text = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      const events = done ? parser.end(decoder.decode()) : parser.push(decoder.decode(value, { stream: true }));
+      for (const { event, data: raw } of events) {
+        let data = null;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          continue; // not ours
+        }
+        if (event === "delta" && typeof data?.text === "string") {
+          text += data.text;
+          onText(text);
+        } else if (event === "done" && typeof data?.answer === "string") {
+          reader.cancel().catch(() => {});
+          return { status: 200, ok: true, data };
+        } else if (event === "error") {
+          reader.cancel().catch(() => {});
+          return { status: 503, ok: false, data };
+        }
+      }
+      if (done) return null;
+    }
+  }
+
+  /**
+   * The answer to one question: streamed when possible, else from POST /chat. `onText` gets the
+   * text so far while it streams; `onRestart()` runs before /chat is asked, so any streamed text
+   * can be taken down. Returns { status, ok, data } as /chat's response; throws on a network
+   * error or timeout, as fetch does.
+   */
+  async function requestAnswer(fetchFn, apiUrl, payload, { onText = () => {}, onRestart = () => {}, signal } = {}) {
+    const streamed = await streamAnswer(fetchFn, apiUrl, payload, onText, signal).catch(() => null);
+    if (streamed) return streamed;
+    onRestart();
+    const response = await fetchFn(`${apiUrl}/chat`, postJson(payload, signal));
+    return { status: response.status, ok: response.ok, data: await response.json().catch(() => null) };
   }
 
   /** What to say when /chat doesn't answer. The API's own words when it gives them (question too
@@ -555,7 +673,7 @@
             handles your question.
           </p>
           <div class="messages-wrap">
-            <div class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+            <div class="messages" role="log" aria-live="polite" aria-label="Conversation" tabindex="0"></div>
             <button class="new-message" type="button" hidden>${ICON.down}<span>New message</span></button>
           </div>
           <form class="form" novalidate>
@@ -830,6 +948,8 @@
     const confirmBox = $(".confirm");
     const deleteAll = $(".delete-all");
     const resume = $(".resume");
+    // The conversation can take focus (tabindex="0" in SHELL), so it can be scrolled from the
+    // keyboard even when nothing in it is focusable, as while an inert answer streams in.
     const messages = $(".messages");
     const form = $(".form");
     const input = $("#question");
@@ -1187,30 +1307,90 @@
 
       // Only the conversation on screen: a new conversation starts with no history.
       const history = recentTurns(conversation ? conversation.messages : []);
+      const streaming = streamedText(loading);
       try {
-        const response = await fetch(`${options.apiUrl}/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, history }),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        const data = await response.json().catch(() => null);
+        const response = await requestAnswer(
+          fetch,
+          options.apiUrl,
+          { question, history },
+          {
+            onText: streaming.show,
+            onRestart: streaming.remove, // /chat answers from the start: the dots come back
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), // one deadline for stream and /chat
+          }
+        );
+        const { status, ok, data } = response;
+        const shown = streaming.stop(); // the streamed bubble, if any text came
         loading.remove(); // first, so the reply takes its place instead of jumping up after it
-        if (response.ok && data && typeof data.answer === "string") {
+        if (ok && data && typeof data.answer === "string") {
           const answeredAt = Date.now();
-          addAnswer(data, answeredAt);
+          addAnswer(data, answeredAt, shown);
           remember({ role: "user", text: question, at: askedAt });
           remember({ role: "bot", at: answeredAt, data: { answer: data.answer, sources: data.sources } });
         } else {
-          failed(errorMessage(response.status, data), question);
+          if (shown) shown.remove(); // an answer that broke off isn't left half-written
+          failed(errorMessage(status, data), question);
         }
       } catch {
+        streaming.stop()?.remove();
         loading.remove();
         failed(MESSAGES.network, question); // offline, CORS blocked, or timed out
       } finally {
         loading.remove();
         setBusy(false);
       }
+    }
+
+    /**
+     * The answer bubble while text streams in. It takes the typing indicator's place when the
+     * first text arrives, and is redrawn with renderMarkdown (never as HTML) at most once a frame.
+     * It is inert while it grows: screen readers hear the finished answer once, and its links
+     * can't take focus until the answer is complete. stop() returns the bubble (or null), which
+     * the finished answer then replaces in place.
+     */
+    function streamedText(loading) {
+      let group = null;
+      let answer = null;
+      let latest = "";
+      let queued = false;
+      let stopped = false;
+      const paint = () => {
+        queued = false;
+        if (stopped || !answer) return;
+        answer.replaceChildren(renderMarkdown(latest, document));
+      };
+      return {
+        show(text) {
+          if (stopped) return;
+          latest = text;
+          if (!group) {
+            const bubble = document.createElement("div");
+            bubble.className = "message bot streaming";
+            answer = document.createElement("div");
+            answer.className = "answer";
+            answer.inert = true;
+            answer.setAttribute("aria-hidden", "true"); // for browsers without inert
+            bubble.appendChild(answer);
+            group = document.createElement("div");
+            group.className = "message-group bot settled"; // the dots already slid in
+            group.appendChild(bubble);
+            loading.replaceWith(group);
+          }
+          if (queued) return;
+          queued = true;
+          if (typeof requestAnimationFrame === "function") requestAnimationFrame(paint);
+          else setTimeout(paint, 0);
+        },
+        remove() {
+          if (group) group.replaceWith(loading);
+          group = answer = null;
+          latest = "";
+        },
+        stop() {
+          stopped = true;
+          return group;
+        },
+      };
     }
 
     function setBusy(value) {
@@ -1245,7 +1425,8 @@
       });
     }
 
-    function addAnswer(data, at = Date.now()) {
+    /** An answer with its sources and thumbs. `replacing`: the streamed bubble it takes over. */
+    function addAnswer(data, at = Date.now(), replacing = null) {
       addMessage("bot", at, (el) => {
         const answer = document.createElement("div");
         answer.className = "answer";
@@ -1258,7 +1439,7 @@
         if (sources.length) el.appendChild(sourcesChip(document, sourceCards(sources), nextId("sources")));
       }, typeof data.request_id === "string" && data.request_id
         ? () => feedbackButtons(data.request_id)
-        : null);
+        : null, replacing);
     }
 
     /**
@@ -1350,8 +1531,12 @@
      *
      * The view scrolls to the start of the new message, so a long answer is read from the top,
      * unless the student has scrolled up to read: then it stays put and "New message" appears.
+     *
+     * With `replacing` (a streamed answer's bubble), the message takes that bubble's place without
+     * moving: the student may be reading it. A long one keeps its full height, with "Show less".
+     * "New message" appears only if they've scrolled up past where it starts.
      */
-    function addMessage(kind, at, fill, trailing) {
+    function addMessage(kind, at, fill, trailing, replacing = null) {
       const el = document.createElement("div");
       el.className = `message ${kind}`;
       fill(el);
@@ -1373,6 +1558,14 @@
         added.className = `message-group ${kind.startsWith("user") ? "user" : "bot"}`;
         added.append(el, footer);
       }
+      if (replacing && replacing.isConnected) {
+        added.classList.add("settled"); // already on screen: no slide-in
+        replacing.replaceWith(added); // added whole, so the live region reads it once
+        for (const answer of el.querySelectorAll(".answer")) fitAnswer(answer, true);
+        const below = messages.scrollTop + messages.clientHeight < added.offsetTop + 40;
+        newMessage.added(added, false, below && !!messages.clientHeight);
+        return el;
+      }
       const mine = kind.startsWith("user");
       const follow = mine || restoring || scrolling || !messages.clientHeight || isNearBottom(messages);
       if (restoring) added.classList.add("settled"); // redrawn messages don't slide in
@@ -1387,15 +1580,21 @@
       animateScroll(messages, Math.max(0, el.offsetTop - 16), () => (scrolling = false));
     }
 
-    /** Cuts a long answer off with "Show more". Needs the chat on screen to measure it. */
-    function fitAnswer(answer) {
+    /** Cuts a long answer off with "Show more", or, for one that was just streamed and read
+     * (`open`), leaves it whole with "Show less". Needs the chat on screen to measure it. */
+    function fitAnswer(answer, open = false) {
       if (!messages.clientHeight) {
         unfitted.push(answer);
         return;
       }
       if (!needsShowMore(answer.scrollHeight)) return;
       answer.id = nextId("answer");
-      const button = showMore(document, answer, () => !reducedMotion());
+      let animate = !open; // opening a streamed answer is instant: it's already open on screen
+      const button = showMore(document, answer, () => animate && !reducedMotion());
+      if (open) {
+        button.click();
+        animate = true;
+      }
       button.addEventListener("click", () => {
         // After "Show less", bring the answer's start back if it's above the view.
         const group = answer.closest(".message-group") || answer;
@@ -1479,6 +1678,9 @@
       formatDate,
       feedbackRequest,
       errorMessage,
+      sseParser,
+      requestAnswer,
+      STREAM_FALLBACK_STATUSES,
       recentTurns,
       HISTORY_TURNS,
       MESSAGES,
