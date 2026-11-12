@@ -134,6 +134,32 @@ def test_accommodations_answer_citing_the_requesting_page_passes():
     assert check_answer(accommodations, 200, answer).passed
 
 
+@pytest.mark.parametrize(
+    "answer, claims",
+    [
+        ("Yes! DSU has a medical school in Dover.", True),
+        ("DSU offers an MD program through its College of Health.", True),
+        ("Delaware State University offers a medical degree.", True),
+        ("DSU's medical school opened in 2020.", True),
+        ("It also offers an M.D. program.", True),
+        # Saved answers the old "m.d. program" rule failed (4 of them, in 3 of #83's 7 runs)
+        ("I couldn't find a medical school (an M.D. program) on the DSU pages I have.", False),
+        ("They don't say whether DSU offers an MD program.", False),
+        ("The pages mention an MSN, but nothing about an m.d. program.", False),
+        (
+            "I couldn't find anything on the DSU pages I have that says DSU has a medical school.",
+            False,
+        ),
+        ("I can't confirm that DSU has a medical school.", False),
+        ("DSU offers a Pre-Medicine concentration in the Food and Nutritional Sciences BS.", False),
+    ],
+)
+def test_medical_school_case_fails_only_answers_that_claim_one(answer, claims):
+    [medical] = [c for c in load_cases() if c.question == "Does DSU have a medical school?"]
+    failures = check_answer(medical, 200, ok(answer, ())).failures
+    assert any(f.startswith("contains forbidden") for f in failures) is claims
+
+
 def test_prior_questions_are_split_and_optional(tmp_path, cases_csv):
     assert all(c.prior_questions == [] for c in load_cases(cases_csv))  # an older CSV loads
     path = tmp_path / "follow-ups.csv"

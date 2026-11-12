@@ -145,6 +145,9 @@ a failed judge call, is a **judge error** and counts as a failure, never a pass.
   source's date, not failed as unsupported. `--judge` uses today; `--compare` uses the saved run's
   date (`run_at`). Cases never hardcode whether a date has passed, so they keep working as dates
   move.
+- The judge also sees the pages the answer cites (`--calibrate` answers don't record them, so it
+  sees none there). A case's `expected_answer` note can then accept a fact only when it's cited,
+  as the medical school case does for DSU's Pre-Medicine concentration.
 - The judge isn't the default and doesn't decide pass or fail on its own: it is a second opinion
   for phrase-check failures (above). `--judge` turns it on; without it grading is exactly as before.
 

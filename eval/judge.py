@@ -72,6 +72,9 @@ deadline or event has passed or is still ahead, check it against that date and t
 sources: a status that follows from them is supported, and one that doesn't is a fail. The date \
 itself must still match the sources.
 
+<assistant_cited>, when present, lists the pages the answer cites: the student sees them as \
+source links under it. Use it when the good answer note says a fact is fine only when cited.
+
 For a follow-up question, what the assistant was given starts with <history>: the conversation's \
 earlier questions and answers. Use it to understand what the question means. It is not a source: \
 a fact found only in the history counts as not in the sources.
@@ -190,21 +193,22 @@ class Judge:
         chunks,
         history: Sequence[Turn] = (),
         today: date | None = None,
+        cited: Sequence[str] | None = None,
     ):
         # Exactly what the bot was given, a follow-up's earlier turns included, and the date its
         # system prompt gave it (the rest of that prompt is the bot's rules, not material).
         today = today or date.today()
         given = build_prompt(question, chunks, today, history).messages[0]["content"]
-        content = "\n\n".join(
-            [
-                _tag("expected_behavior", BEHAVIOR_RULES[behavior]),
-                _tag("good_answer_note", expected_answer or "(none)"),
-                _tag("todays_date", today.isoformat()),
-                _tag("assistant_was_given", given),
-                _tag("assistant_answer", answer),
-            ]
-        )
-        return [{"role": "user", "content": content}]
+        parts = [
+            _tag("expected_behavior", BEHAVIOR_RULES[behavior]),
+            _tag("good_answer_note", expected_answer or "(none)"),
+            _tag("todays_date", today.isoformat()),
+            _tag("assistant_was_given", given),
+            _tag("assistant_answer", answer),
+        ]
+        if cited is not None:  # None: not known (calibration answers don't record them)
+            parts.append(_tag("assistant_cited", "\n".join(cited) or "(none)"))
+        return [{"role": "user", "content": "\n\n".join(parts)}]
 
     def grade(
         self,
@@ -215,14 +219,16 @@ class Judge:
         sources: Sources | None = None,
         history: Sequence[Turn] = (),
         today: date | None = None,
+        cited: Sequence[str] | None = None,
     ) -> Verdict:
         """The judge's verdict, against these sources (default: rebuilt by keyword search), for a
-        follow-up the earlier turns the bot saw, and the date the bot was told (default: today; a
-        saved run's answers were written on its own date). A failed call or an unreadable reply
-        is a judge error (passed is None), which the eval counts as a failure."""
+        follow-up the earlier turns the bot saw, the date the bot was told (default: today; a
+        saved run's answers were written on its own date), and the pages the answer cites (None:
+        not known). A failed call or an unreadable reply is a judge error (passed is None),
+        which the eval counts as a failure."""
         sources = sources or self.sources(question)
         messages = self.messages(
-            question, behavior, expected_answer, answer, sources.chunks, history, today
+            question, behavior, expected_answer, answer, sources.chunks, history, today, cited
         )
         try:
             reply = self.client.complete(SYSTEM, messages)

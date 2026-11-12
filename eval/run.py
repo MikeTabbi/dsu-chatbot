@@ -458,6 +458,7 @@ def run_full(
                         body["answer"],
                         judge.sources(case.question, chunk_ids),
                         _turns(history),
+                        cited=[s["url"] for s in body.get("sources", [])],
                     )
                 result = check_answer(case, response.status_code, body, verdict)
                 result.chunk_ids = chunk_ids
@@ -726,6 +727,7 @@ def compare(saved: dict, cases: list[Case], judge: Judge) -> tuple[list[Comparis
                 sources,
                 _turns(r.get("history")),
                 run_date,
+                r["source_urls"],
             )
         comparisons.append(
             Comparison(
