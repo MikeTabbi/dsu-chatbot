@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 
@@ -83,6 +84,29 @@ def test_judge_sees_the_rule_the_note_the_bots_sources_and_the_answer(retriever)
     assert MATRIX in content and "Carpeted rooms: Wynder Tower." in content
     assert "<question>\nWhich dorms have carpeted rooms?\n</question>" in content
     assert "<assistant_answer>\nNo thanks.\n</assistant_answer>" in content
+
+
+def test_judge_sees_the_date_the_bot_was_told(retriever):
+    # The bot's system prompt gives it today's date, and answers say which deadlines have
+    # passed; without the date the judge failed correct date reasoning as unsupported.
+    judge = judge_with(PASS, retriever)
+    judge.grade("q", "decline", "", "Hi", today=date(2026, 11, 12))
+    judge.grade("q", "decline", "", "Hi")
+    [dated, default] = [call[1][0]["content"] for call in judge.client.calls]
+    assert "<todays_date>\n2026-11-12\n</todays_date>" in dated
+    assert f"<todays_date>\n{date.today().isoformat()}\n</todays_date>" in default
+    assert "<todays_date>" in SYSTEM
+
+
+def test_judge_sees_the_pages_the_answer_cites_when_known(retriever):
+    judge = judge_with(PASS, retriever)
+    judge.grade("q", "say_not_found", "", "Hi", cited=["https://cast.desu.edu/programs"])
+    judge.grade("q", "say_not_found", "", "Hi", cited=[])
+    judge.grade("q", "say_not_found", "", "Hi")  # calibration: not recorded
+    [cited, none, unknown] = [call[1][0]["content"] for call in judge.client.calls]
+    assert "<assistant_cited>\nhttps://cast.desu.edu/programs\n</assistant_cited>" in cited
+    assert "<assistant_cited>\n(none)\n</assistant_cited>" in none
+    assert "<assistant_cited>" not in unknown
 
 
 def test_an_answer_cannot_close_its_own_tag(retriever):
@@ -374,6 +398,15 @@ def test_compare_judges_against_the_saved_chunk_ids_in_order(
     # not keyword search's order for "Which dorms have carpeted rooms?", which puts c0 first
     assert sources.index("Step 3.") < sources.index("Carpeted rooms: Wynder Tower.")
     assert "WARNING" not in capsys.readouterr().out
+
+
+def test_compare_judges_on_the_date_of_the_saved_run(patched, cases_csv, tmp_path, fake_judge):
+    path = saved_run(tmp_path, ["Wynder Tower."], chunk_ids=["c0"])
+    data = json.loads(path.read_text())
+    path.write_text(json.dumps({**data, "run_at": "2026-03-01T23:59:00"}))
+    assert main(["--compare", str(path), "--client", "fake", "--cases", str(cases_csv)]) == 0
+    [call] = fake_judge.calls
+    assert "<todays_date>\n2026-03-01\n</todays_date>" in call[1][0]["content"]
 
 
 def test_compare_on_a_run_without_chunk_ids_rebuilds_them_and_warns(
