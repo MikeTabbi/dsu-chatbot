@@ -1,8 +1,10 @@
 """Send a system prompt and messages to Claude. /chat depends on the ClaudeClient interface only."""
 
 import argparse
+import contextlib
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
 
@@ -46,6 +48,12 @@ class ClaudeClient(Protocol):
         """Claude's answer to the conversation. Raises ClaudeError on any failure."""
         ...
 
+    def stream(self, system: str, messages: list[ChatMessage]) -> Iterator[str | ClaudeReply]:
+        """The same answer as complete(), as it is written: the text in pieces (str), then the
+        whole reply (ClaudeReply) last. Raises ClaudeError on any failure, before or while the
+        text arrives. Closing the iterator early stops the call."""
+        ...
+
 
 class AnthropicClaudeClient:
     """Claude through Anthropic's API, using the official anthropic SDK."""
@@ -78,24 +86,38 @@ class AnthropicClaudeClient:
 
     def complete(self, system: str, messages: list[ChatMessage]) -> ClaudeReply:
         start = time.perf_counter()
+        with self._errors(start):
+            response = self._sdk.messages.create(**self._request(system, messages))
+        return self._reply(start, response)
+
+    def stream(self, system: str, messages: list[ChatMessage]) -> Iterator[str | ClaudeReply]:
+        start = time.perf_counter()
+        # The SDK raises the same errors when the call fails while the text is arriving.
+        with self._errors(start), self._sdk.messages.stream(**self._request(system, messages)) as s:
+            yield from s.text_stream
+            response = s.get_final_message()
+        yield self._reply(start, response)
+
+    def _request(self, system: str, messages: list[ChatMessage]) -> dict:
+        extra = {}
+        output_config = {}
+        if self.json_schema is not None:
+            output_config["format"] = {"type": "json_schema", "schema": self.json_schema}
+        if self.effort:
+            output_config["effort"] = self.effort
+        if output_config:
+            extra["output_config"] = output_config
+        if self.thinking:
+            extra["thinking"] = {"type": self.thinking}
+        return dict(
+            model=self.model, max_tokens=self.max_tokens, system=system, messages=messages, **extra
+        )
+
+    @contextlib.contextmanager
+    def _errors(self, start: float) -> Iterator[None]:
+        """Turns the SDK's errors into ClaudeError, logged with the reason."""
         try:
-            extra = {}
-            output_config = {}
-            if self.json_schema is not None:
-                output_config["format"] = {"type": "json_schema", "schema": self.json_schema}
-            if self.effort:
-                output_config["effort"] = self.effort
-            if output_config:
-                extra["output_config"] = output_config
-            if self.thinking:
-                extra["thinking"] = {"type": self.thinking}
-            response = self._sdk.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system,
-                messages=messages,
-                **extra,
-            )
+            yield
         except anthropic.APITimeoutError as e:  # before APIConnectionError, its parent class
             raise self._fail(start, "timeout", e) from e
         except anthropic.RateLimitError as e:
@@ -107,6 +129,7 @@ class AnthropicClaudeClient:
         except anthropic.APIError as e:
             raise self._fail(start, "api_error", e) from e
 
+    def _reply(self, start: float, response) -> ClaudeReply:
         latency_ms = (time.perf_counter() - start) * 1000
         reply = ClaudeReply(
             text="".join(b.text for b in response.content if b.type == "text").strip(),
@@ -146,8 +169,9 @@ class FakeClaudeClient:
 
     model = "fake"
 
-    def __init__(self, answer: str | None = None):
+    def __init__(self, answer: str | None = None, chunk_chars: int = 4):
         self.answer = answer  # None: echo the last user message, then a <cited> marker
+        self.chunk_chars = chunk_chars  # stream() sends the answer in pieces this long
         self.calls: list[tuple[str, list[ChatMessage]]] = []
 
     def complete(self, system: str, messages: list[ChatMessage]) -> ClaudeReply:
@@ -168,6 +192,14 @@ class FakeClaudeClient:
             reply.output_tokens,
         )
         return reply
+
+    def stream(self, system: str, messages: list[ChatMessage]) -> Iterator[str | ClaudeReply]:
+        """complete()'s answer, sent chunk_chars characters at a time, then the reply."""
+        reply = self.complete(system, messages)
+        n = max(1, self.chunk_chars)
+        for i in range(0, len(reply.text), n):
+            yield reply.text[i : i + n]
+        yield reply
 
 
 def get_claude_client(config: Settings = settings) -> ClaudeClient:

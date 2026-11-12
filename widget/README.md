@@ -6,7 +6,8 @@ avatar, "Welcome to Delaware State University! How can we help you today?" over 
 photo with a red gradient,
 and **Start New Conversation** (blue), **Resume Last Conversation**, and **See Past Conversations**. Buttons in the top-right corner make the panel full screen
 and close it. Students type a question. The widget sends it to
-the backend's `POST /chat` and shows the answer with its sources as small cards (title, link, and
+the backend and shows the answer as it is written (`POST /chat/stream`, or `POST /chat` if
+streaming isn't available), then its sources as small cards (title, link, and
 "Last updated" date).
 
 It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the files and reload.
@@ -20,9 +21,10 @@ It's plain JavaScript and CSS: no framework, no npm, no build step. Edit the fil
 | `dsu-campus.jpg` | Aerial campus photo behind the welcome text (see "Header photo") |
 | `fonts/` | Roboto font files you add (see "Font"). Optional: without them the widget uses Arial |
 | `demo.html` | A test page that loads the widget like dsu.edu would |
-| `dsu-chat-mock.js` | Saved `/chat` replies for mock mode (demo page only, never embedded) |
+| `dsu-chat-mock.js` | Saved `/chat` replies, streamed or whole, for mock mode (demo page only, never embedded) |
 | `tests/render.test.js` | Checks that answer text can't inject HTML or `javascript:` links |
-| `tests/mock.test.js` | Checks that mock mode, thumbs up/down included, never makes a network request |
+| `tests/mock.test.js` | Checks that mock mode, thumbs up/down and streaming included, never makes a network request |
+| `tests/streaming.test.js` | Checks streamed answers: events split anywhere, the fallback to `/chat`, and that streamed HTML and `javascript:` links stay text |
 | `tests/history.test.js` | Checks saved conversations: limits, expiry, moving the old save, blocked storage |
 | `tests/fluid.test.js` | Checks Show more, the Sources chip, and the New message button |
 | `tests/followup.test.js` | Checks the history sent with each question: last turns only, current conversation only |
@@ -260,12 +262,18 @@ word in quotes does the same:
 | Personal-data redirect, no sources | "personal" |
 | Off-topic decline | "off topic" |
 | Typing indicator for 5 seconds, then the short answer | "slow" |
+| Slow streaming: the long answer a couple of words at a time, to watch or screenshot it mid-way | "streaming" |
+| A stream that breaks off partway with the API's "can't answer right now" message | "stream error" |
+| No streaming endpoint (404), so the widget falls back to `/chat` | "no stream" |
 | New message button: the long answer after 2.5 seconds. The button asks a long answer first if there's nothing to scroll back to, then scrolls up while it loads | "new message" |
 | Too many questions (429), the API's "please wait" message | "rate limit" |
 | Unavailable (503) | "503" |
 | Network error | "network" |
 | Question too long, as the API reports it | "too long" |
 | Question too long, the message under the box | the last button (fills in 1,001 characters) |
+
+Every answer streams in (a couple of words every 40 ms, after the state's delay), as
+`/chat/stream` would send it; errors come back as the same JSON `/chat` sends.
 
 The replies are real `/chat` answers saved in [dsu-chat-mock.js](dsu-chat-mock.js). That file
 replaces `fetch` on the demo page, so nothing is sent anywhere. Only `demo.html` loads it, and it

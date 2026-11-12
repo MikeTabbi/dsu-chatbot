@@ -55,7 +55,8 @@ test("questions without a saved answer and malformed messages are skipped", () =
 test("each question is posted with the current conversation's history", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "dsu-chat.js"), "utf8");
   assert.match(source, /recentTurns\(conversation \? conversation\.messages : \[\]\)/);
-  assert.match(source, /body: JSON\.stringify\(\{ question, history \}\)/);
+  // Sent as is to /chat/stream, and to /chat if streaming falls back (see streaming.test.js).
+  assert.match(source, /requestAnswer\(\s*fetch,\s*options\.apiUrl,\s*\{ question, history \}/);
 });
 
 test("the welcome message says Jada remembers the conversation", () => {

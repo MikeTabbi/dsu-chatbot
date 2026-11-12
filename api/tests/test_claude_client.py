@@ -266,3 +266,113 @@ def test_cli_exits_with_a_message_on_failure(monkeypatch):
     monkeypatch.setattr("api.app.claude_client.get_claude_client", lambda: client)
     with pytest.raises(SystemExit, match="Claude call failed: timeout"):
         main(["Where is the library?"])
+
+
+# stream() ------------------------------------------------------------------------------------
+
+
+class StubStream:
+    """Stands in for the SDK's MessageStream: the text pieces, then the final message. `fail`
+    is raised after `fail_after` pieces, as the SDK raises an error that arrives mid-stream."""
+
+    def __init__(self, pieces, final, fail=None, fail_after=0):
+        self.pieces, self.final, self.fail, self.fail_after = pieces, final, fail, fail_after
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed = True
+
+    @property
+    def text_stream(self):
+        for n, piece in enumerate(self.pieces):
+            if self.fail and n == self.fail_after:
+                raise self.fail
+            yield piece
+        if self.fail and self.fail_after >= len(self.pieces):
+            raise self.fail
+
+    def get_final_message(self):
+        return self.final
+
+
+class StreamingStubSDK(StubSDK):
+    def __init__(self, stream=None, error=None):
+        super().__init__(None)
+        self.stub_stream, self.error = stream, error
+
+    def stream(self, **kwargs):
+        self.requests.append(kwargs)
+        if self.error:
+            raise self.error
+        return self.stub_stream
+
+
+def streaming_client(stub, **kwargs):
+    return AnthropicClaudeClient(KEY, "claude-opus-5", 512, 5.0, sdk_client=stub, **kwargs)
+
+
+def test_stream_sends_the_text_pieces_then_the_reply(caplog):
+    text = "Move-in starts August 20."
+    stub = StreamingStubSDK(StubStream(["Move-in ", "starts ", "August 20."], response(text)))
+    client = streaming_client(stub, thinking="adaptive", effort="low")
+    with caplog.at_level(logging.INFO, logger="api.app.claude_client"):
+        items = list(client.stream(SYSTEM, MESSAGES))
+    assert items[:-1] == ["Move-in ", "starts ", "August 20."]
+    assert items[-1] == client._reply(0, response(text))
+    [request] = stub.requests
+    assert request["thinking"] == {"type": "adaptive"}  # the same request as complete()
+    assert request["output_config"] == {"effort": "low"}
+    assert stub.stub_stream.closed
+    assert "output_tokens=7" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "error, reason",
+    [
+        (anthropic.APITimeoutError(request=REQUEST), "timeout"),
+        (anthropic.APIConnectionError(request=REQUEST), "connection"),
+        (status_error(anthropic.InternalServerError, 529), "api_error"),
+    ],
+)
+@pytest.mark.parametrize("fail_after", [0, 2])
+def test_stream_errors_become_claude_errors_before_or_during_the_text(error, reason, fail_after):
+    stub = StreamingStubSDK(StubStream(["a", "b", "c"], response(), error, fail_after))
+    received = []
+    with pytest.raises(ClaudeError) as e:
+        for item in streaming_client(stub).stream(SYSTEM, MESSAGES):
+            received.append(item)
+    assert e.value.reason == reason
+    assert received == ["a", "b"][:fail_after]
+    assert stub.stub_stream.closed
+
+
+def test_stream_error_opening_the_call_is_a_claude_error():
+    stub = StreamingStubSDK(error=status_error(anthropic.RateLimitError, 429))
+    with pytest.raises(ClaudeError) as e:
+        list(streaming_client(stub).stream(SYSTEM, MESSAGES))
+    assert e.value.reason == "rate_limit"
+
+
+def test_stream_refusal_is_no_answer_after_the_text():
+    stub = StreamingStubSDK(StubStream(["I can't"], response("I can't", stop_reason="refusal")))
+    with pytest.raises(ClaudeError) as e:
+        list(streaming_client(stub).stream(SYSTEM, MESSAGES))
+    assert e.value.reason == "no_answer"
+
+
+def test_closing_the_stream_early_closes_the_call():
+    stub = StreamingStubSDK(StubStream(["a", "b", "c"], response()))
+    items = streaming_client(stub).stream(SYSTEM, MESSAGES)
+    assert next(items) == "a"
+    items.close()  # the student left
+    assert stub.stub_stream.closed
+
+
+def test_fake_stream_sends_the_complete_answer_in_pieces():
+    fake = FakeClaudeClient(answer="Tubman has carpet.\n<cited>1</cited>", chunk_chars=5)
+    items = list(fake.stream(SYSTEM, MESSAGES))
+    assert all(len(p) <= 5 for p in items[:-1])
+    assert "".join(items[:-1]) == items[-1].text == fake.complete(SYSTEM, MESSAGES).text
