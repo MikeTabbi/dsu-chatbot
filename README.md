@@ -225,7 +225,24 @@ backstop well above that, not the way answers are kept short (the prompt does th
 [System prompt](#system-prompt)). Set it too low and an answer is cut off, or comes back empty
 and `/chat` returns a 503.
 
+How much the answer call thinks is set by two settings (#82). Both are blank by default, which
+sends nothing, so the model's own default applies (`claude-sonnet-5-5`: adaptive thinking at
+`high` effort):
+
+- `CLAUDE_THINKING`: sent as `thinking.type`. `adaptive` (the model decides how much to think),
+  `between_tools` (no thinking before the answer; `claude-sonnet-5-5`'s way to turn thinking off,
+  accepted only at `high` effort or below), or `disabled` (thinking off on models that accept it;
+  `claude-sonnet-5-5` rejects it).
+- `CLAUDE_EFFORT`: sent as `output_config.effort`. `low`, `medium`, `high`, `xhigh`, or `max`.
+  Lower effort means less thinking and shorter output, so a faster answer.
+
+A combination the model doesn't accept is a 400, which `/chat` shows as its "unavailable" message,
+so try a new setting with the CLI below before deploying it. They only change the answer call:
+the query rewriter and reranker (`claude-haiku-4-5`) send no thinking setting, which on that model
+means no thinking, and the eval's judge keeps the model's default so runs are graded alike.
+
 ```bash
+CLAUDE_CLIENT=anthropic CLAUDE_THINKING=between_tools CLAUDE_EFFORT=low python -m api.app.claude_client "hi"
 python -m api.app.claude_client "When does fall move-in start?"                        # fake
 CLAUDE_CLIENT=anthropic python -m api.app.claude_client "Reply with: hello from DSU"   # real call
 ```

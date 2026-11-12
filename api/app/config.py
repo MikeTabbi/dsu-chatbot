@@ -3,6 +3,12 @@
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The values the API takes. Which ones a model accepts varies: claude-sonnet-5-5 rejects
+# "disabled" (its thinking-off is "between_tools", only at high effort or below), and
+# claude-haiku-4-5 takes neither "adaptive" nor "between_tools". A rejected pair is a 400.
+THINKING_TYPES = ("adaptive", "between_tools", "disabled")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
 
 class Settings(BaseSettings):
     # env_ignore_empty: a blank line like CLAUDE_MODEL= keeps the default instead of setting ""
@@ -13,6 +19,10 @@ class Settings(BaseSettings):
     claude_model: str = "claude-opus-5"  # placeholder until the model is chosen in #19
     claude_max_output_tokens: int = 2048  # includes thinking tokens; see README "Claude client"
     claude_timeout_seconds: float = 30.0
+    # How much the answer call thinks (#82); blank sends nothing, so the model's default applies
+    # (claude-sonnet-5-5: adaptive thinking at high effort). See README "Claude client".
+    claude_thinking: str = ""  # thinking.type: adaptive | between_tools | disabled
+    claude_effort: str = ""  # output_config.effort: low | medium | high | xhigh | max
     judge_model: str = ""  # the eval's Claude grader (eval/judge.py); blank: CLAUDE_MODEL
     search_endpoint: str = ""
     search_api_key: str = ""
@@ -65,6 +75,20 @@ class Settings(BaseSettings):
     def _no_wildcard_origin(cls, value: str) -> str:
         if "*" in value:
             raise ValueError("ALLOWED_ORIGINS must list exact sites; '*' (any site) isn't allowed")
+        return value
+
+    @field_validator("claude_thinking")
+    @classmethod
+    def _known_thinking(cls, value: str) -> str:
+        if value and value not in THINKING_TYPES:
+            raise ValueError(f"CLAUDE_THINKING must be blank or one of {', '.join(THINKING_TYPES)}")
+        return value
+
+    @field_validator("claude_effort")
+    @classmethod
+    def _known_effort(cls, value: str) -> str:
+        if value and value not in EFFORT_LEVELS:
+            raise ValueError(f"CLAUDE_EFFORT must be blank or one of {', '.join(EFFORT_LEVELS)}")
         return value
 
     @property

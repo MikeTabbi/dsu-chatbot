@@ -125,6 +125,18 @@ def test_judge_model_defaults_to_the_bot_model():
     assert get_judge_client(config.model_copy(update={"judge_model": "m2"})).model == "m2"
 
 
+def test_judge_ignores_the_bots_thinking_settings():
+    config = Settings(
+        _env_file=None,
+        claude_client="anthropic",
+        anthropic_api_key="sk-test",
+        claude_thinking="between_tools",
+        claude_effort="low",
+    )
+    judge = get_judge_client(config)
+    assert (judge.thinking, judge.effort) == ("", "")
+
+
 # Grading with a verdict
 
 

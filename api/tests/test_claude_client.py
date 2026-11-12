@@ -86,6 +86,57 @@ def test_a_json_schema_is_sent_as_structured_output_format():
     assert request["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
 
 
+def test_thinking_and_effort_are_sent_when_set():
+    stub = StubSDK(response())
+    client = AnthropicClaudeClient(
+        KEY, "claude-sonnet-5-5", 512, 5.0, sdk_client=stub, thinking="between_tools", effort="low"
+    )
+    client.complete(SYSTEM, MESSAGES)
+    [request] = stub.requests
+    assert request["thinking"] == {"type": "between_tools"}
+    assert request["output_config"] == {"effort": "low"}
+
+
+def test_effort_is_sent_beside_a_json_schema():
+    stub = StubSDK(response())
+    schema = {"type": "object"}
+    client = AnthropicClaudeClient(
+        KEY, "claude-sonnet-5-5", 512, 5.0, sdk_client=stub, json_schema=schema, effort="medium"
+    )
+    client.complete(SYSTEM, MESSAGES)
+    [request] = stub.requests
+    assert request["output_config"] == {
+        "format": {"type": "json_schema", "schema": schema},
+        "effort": "medium",
+    }
+    assert "thinking" not in request
+
+
+def test_thinking_and_effort_come_from_settings():
+    config = Settings(
+        _env_file=None,
+        claude_client="anthropic",
+        anthropic_api_key=KEY,
+        claude_thinking="adaptive",
+        claude_effort="medium",
+    )
+    client = get_claude_client(config)
+    assert (client.thinking, client.effort) == ("adaptive", "medium")
+    default = get_claude_client(
+        Settings(_env_file=None, claude_client="anthropic", anthropic_api_key=KEY)
+    )
+    assert (default.thinking, default.effort) == ("", "")
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [{"claude_thinking": "off"}, {"claude_thinking": "enabled"}, {"claude_effort": "min"}],
+)
+def test_unknown_thinking_or_effort_is_refused(setting):
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, **setting)
+
+
 def test_logs_model_tokens_and_latency_but_never_the_key(caplog):
     client, _ = client_for(response())
     with caplog.at_level(logging.INFO, logger="api.app.claude_client"):

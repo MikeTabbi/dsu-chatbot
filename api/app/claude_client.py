@@ -60,12 +60,17 @@ class AnthropicClaudeClient:
         max_retries: int = MAX_RETRIES,
         # A JSON schema the reply must match (structured outputs); None: free text
         json_schema: dict | None = None,
+        # Sent as thinking.type and output_config.effort; "" sends nothing (the model's default)
+        thinking: str = "",
+        effort: str = "",
     ):
         if sdk_client is None and not api_key:
             raise ValueError("ANTHROPIC_API_KEY is not set")
         self.model = model
         self.max_tokens = max_tokens
         self.json_schema = json_schema
+        self.thinking = thinking
+        self.effort = effort
         # The key is passed explicitly so it only ever comes from ANTHROPIC_API_KEY (or .env).
         self._sdk = sdk_client or anthropic.Anthropic(
             api_key=api_key, timeout=timeout, max_retries=max_retries
@@ -75,10 +80,15 @@ class AnthropicClaudeClient:
         start = time.perf_counter()
         try:
             extra = {}
+            output_config = {}
             if self.json_schema is not None:
-                extra["output_config"] = {
-                    "format": {"type": "json_schema", "schema": self.json_schema}
-                }
+                output_config["format"] = {"type": "json_schema", "schema": self.json_schema}
+            if self.effort:
+                output_config["effort"] = self.effort
+            if output_config:
+                extra["output_config"] = output_config
+            if self.thinking:
+                extra["thinking"] = {"type": self.thinking}
             response = self._sdk.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
@@ -168,6 +178,8 @@ def get_claude_client(config: Settings = settings) -> ClaudeClient:
             model=config.claude_model,
             max_tokens=config.claude_max_output_tokens,
             timeout=config.claude_timeout_seconds,
+            thinking=config.claude_thinking,
+            effort=config.claude_effort,
         )
     if config.claude_client == "fake":
         return FakeClaudeClient()
