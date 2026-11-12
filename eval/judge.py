@@ -129,10 +129,15 @@ def parse_verdict(text: str) -> Verdict:
 
 def get_judge_client(config: Settings) -> ClaudeClient:
     """The client CLAUDE_CLIENT selects, with JUDGE_MODEL (default: CLAUDE_MODEL). Temperature
-    isn't set: the client doesn't take one, and Claude 5 models reject sampling parameters."""
-    return get_claude_client(
-        config.model_copy(update={"claude_model": config.judge_model or config.claude_model})
-    )
+    isn't set: the client doesn't take one, and Claude 5 models reject sampling parameters.
+    CLAUDE_THINKING and CLAUDE_EFFORT tune the bot, not the judge: it keeps the model's default,
+    so a run that tries a thinking setting is graded the same way as the others."""
+    judge_config = {
+        "claude_model": config.judge_model or config.claude_model,
+        "claude_thinking": "",
+        "claude_effort": "",
+    }
+    return get_claude_client(config.model_copy(update=judge_config))
 
 
 def _tag(name: str, text: str) -> str:
