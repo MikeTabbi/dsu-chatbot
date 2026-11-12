@@ -122,6 +122,18 @@ def test_repo_eval_set_has_follow_ups_with_their_earlier_questions():
     assert {c.category for c in load_cases() if c.prior_questions} == {"answer", "clarify"}
 
 
+def test_accommodations_answer_citing_the_requesting_page_passes():
+    # The CDR's Requesting Accommodations page is the step-by-step answer; runs that cited only
+    # it (and the documentation page) failed on sources before it was accepted.
+    [accommodations] = [c for c in load_cases() if c.question.startswith("How do I get accomm")]
+    page = "https://www.desu.edu/about/administration/general-counsel/center-disability-resources"
+    answer = ok(
+        "Fill out the Request for Accommodations Form in Accommodate and upload documentation.",
+        (f"{page}/students-disabilities/requesting", f"{page}/students-disabilities/documentation"),
+    )
+    assert check_answer(accommodations, 200, answer).passed
+
+
 def test_prior_questions_are_split_and_optional(tmp_path, cases_csv):
     assert all(c.prior_questions == [] for c in load_cases(cases_csv))  # an older CSV loads
     path = tmp_path / "follow-ups.csv"

@@ -140,6 +140,11 @@ a failed judge call, is a **judge error** and counts as a failure, never a pass.
   output, and the judge sees the rest. Runs saved before #67 have no chunk IDs: `--compare`
   warns and rebuilds the sources by keyword search with the run's `k`, without reranking, so
   the judge may see different chunks than the bot did. `--calibrate` always rebuilds them.
+- The judge also sees the date the bot was told (its system prompt gives today's date), so an
+  answer that says a deadline has passed or is still open is checked against that date and the
+  source's date, not failed as unsupported. `--judge` uses today; `--compare` uses the saved run's
+  date (`run_at`). Cases never hardcode whether a date has passed, so they keep working as dates
+  move.
 - The judge isn't the default and doesn't decide pass or fail on its own: it is a second opinion
   for phrase-check failures (above). `--judge` turns it on; without it grading is exactly as before.
 

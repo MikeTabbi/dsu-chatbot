@@ -8,7 +8,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -705,6 +705,9 @@ def compare(saved: dict, cases: list[Case], judge: Judge) -> tuple[list[Comparis
     in the eval set (skipped)."""
     by_question = {c.question: c for c in cases}
     comparisons, skipped = [], []
+    # The bot was told the date of the run, so a deadline it called passed is judged on that date.
+    # run_at is when the run was saved: a run that crossed midnight is judged on its last day.
+    run_date = date.fromisoformat(saved["run_at"][:10]) if saved.get("run_at") else None
     for r in saved["results"]:
         case = by_question.get(r["question"])
         if case is None:
@@ -722,6 +725,7 @@ def compare(saved: dict, cases: list[Case], judge: Judge) -> tuple[list[Comparis
                 r["answer"],
                 sources,
                 _turns(r.get("history")),
+                run_date,
             )
         comparisons.append(
             Comparison(

@@ -9,6 +9,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import date
 
 from api.app.claude_client import ClaudeClient, ClaudeError, get_claude_client
 from api.app.config import Settings
@@ -65,6 +66,11 @@ You grade answers from the Delaware State University (DSU) assistant, a chatbot 
 only from the DSU web pages it is given. You get the student's question, the behavior the answer \
 must show, a note on what a good answer says, the sources the assistant was given, and the \
 assistant's answer. Decide whether the answer shows the expected behavior.
+
+The assistant was also told today's date, which is in <todays_date>. When an answer says a \
+deadline or event has passed or is still ahead, check it against that date and the date in the \
+sources: a status that follows from them is supported, and one that doesn't is a fail. The date \
+itself must still match the sources.
 
 For a follow-up question, what the assistant was given starts with <history>: the conversation's \
 earlier questions and answers. Use it to understand what the question means. It is not a source: \
@@ -183,13 +189,17 @@ class Judge:
         answer: str,
         chunks,
         history: Sequence[Turn] = (),
+        today: date | None = None,
     ):
-        # Exactly what the bot was given, a follow-up's earlier turns included.
-        given = build_prompt(question, chunks, history=history).messages[0]["content"]
+        # Exactly what the bot was given, a follow-up's earlier turns included, and the date its
+        # system prompt gave it (the rest of that prompt is the bot's rules, not material).
+        today = today or date.today()
+        given = build_prompt(question, chunks, today, history).messages[0]["content"]
         content = "\n\n".join(
             [
                 _tag("expected_behavior", BEHAVIOR_RULES[behavior]),
                 _tag("good_answer_note", expected_answer or "(none)"),
+                _tag("todays_date", today.isoformat()),
                 _tag("assistant_was_given", given),
                 _tag("assistant_answer", answer),
             ]
@@ -204,13 +214,15 @@ class Judge:
         answer: str,
         sources: Sources | None = None,
         history: Sequence[Turn] = (),
+        today: date | None = None,
     ) -> Verdict:
-        """The judge's verdict, against these sources (default: rebuilt by keyword search) and,
-        for a follow-up, the earlier turns the bot saw. A failed call or an unreadable reply is a
-        judge error (passed is None), which the eval counts as a failure."""
+        """The judge's verdict, against these sources (default: rebuilt by keyword search), for a
+        follow-up the earlier turns the bot saw, and the date the bot was told (default: today; a
+        saved run's answers were written on its own date). A failed call or an unreadable reply
+        is a judge error (passed is None), which the eval counts as a failure."""
         sources = sources or self.sources(question)
         messages = self.messages(
-            question, behavior, expected_answer, answer, sources.chunks, history
+            question, behavior, expected_answer, answer, sources.chunks, history, today
         )
         try:
             reply = self.client.complete(SYSTEM, messages)
