@@ -241,6 +241,11 @@ so try a new setting with the CLI below before deploying it. They only change th
 the query rewriter and reranker (`claude-haiku-4-5`) send no thinking setting, which on that model
 means no thinking, and the eval's judge keeps the model's default so runs are graded alike.
 
+Measured in November 2026 (#82): `adaptive` at `medium` or `low` effort, and `between_tools`,
+cut median `/chat` latency by about 1 s (6.0 s to 4.9-5.1 s) and p90 by about 2 s, but each
+produced answers with facts the sources don't support (most often calling DSU's FAFSA code its
+SAT code), which the default never did. So the default stays; re-measure before changing it.
+
 ```bash
 CLAUDE_CLIENT=anthropic CLAUDE_THINKING=between_tools CLAUDE_EFFORT=low python -m api.app.claude_client "hi"
 python -m api.app.claude_client "When does fall move-in start?"                        # fake
